@@ -1,0 +1,10 @@
+node_modules/
+auth_info_baileys/
+dist/
+*.log
+.DS_Store
+.env
+histories/
+contacts.json
+recent_interactions.json
+ai_history.json

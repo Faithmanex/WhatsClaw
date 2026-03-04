@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antigravity — Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--border:#1a1a1a;--text:#e5e5e5;--muted:#666;--accent:#3b82f6;--green:#22c55e;--red:#ef4444;--yellow:#eab308}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+.container{max-width:960px;margin:0 auto;padding:24px 16px}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-bottom:1px solid var(--border);margin-bottom:32px}
+header h1{font-size:18px;font-weight:600;letter-spacing:-.5px}
+header h1 span{color:var(--muted);font-weight:400;margin-left:8px;font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface)}
+.badge .dot{width:6px;height:6px;border-radius:50%}
+.dot-green{background:var(--green)}
+.dot-yellow{background:var(--yellow)}
+.dot-red{background:var(--red)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:16px;font-weight:600}
+.card.full{grid-column:1/-1}
+.qr-box{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:280px;gap:16px}
+.qr-box canvas,.qr-box img{border-radius:8px}
+.qr-box .msg{font-size:13px;color:var(--muted)}
+.connected-msg{text-align:center;font-size:14px;color:var(--green);font-weight:500}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:500;text-transform:uppercase;letter-spacing:.3px}
+select,input[type=text],input[type=number],input[type=password]{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;outline:none;transition:border .2s}
+select:focus,input:focus{border-color:var(--accent)}
+select option{background:var(--bg)}
+.row{display:flex;gap:12px}
+.row>*{flex:1}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+.toggle-row:last-child{border:none}
+.toggle-row span{font-size:13px}
+.switch{position:relative;width:36px;height:20px;cursor:pointer}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;inset:0;background:var(--border);border-radius:20px;transition:.2s}
+.switch .slider:before{content:'';position:absolute;width:16px;height:16px;left:2px;top:2px;background:#444;border-radius:50%;transition:.2s}
+.switch input:checked+.slider{background:var(--accent)}
+.switch input:checked+.slider:before{transform:translateX(16px);background:#fff}
+btn,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text);transition:all .15s}
+.btn:hover{border-color:#333;background:#1a1a1a}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{opacity:.9}
+.btn-danger{color:var(--red);border-color:rgba(239,68,68,.3)}
+.btn-danger:hover{background:rgba(239,68,68,.1)}
+.btn-sm{padding:4px 10px;font-size:11px}
+.actions{display:flex;gap:8px;margin-top:16px}
+.instruction-item{display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);gap:12px}
+.instruction-item:last-child{border:none}
+.instruction-item .jid{font-size:11px;color:var(--accent);font-weight:500;word-break:break-all}
+.instruction-item .text{font-size:12px;color:var(--muted);margin-top:2px}
+.empty{text-align:center;padding:24px;color:var(--muted);font-size:13px;font-style:italic}
+.skill-item{padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.skill-item:last-child{border:none}
+.skill-item .name{font-weight:500;color:var(--text)}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
+.toast.show{opacity:1}
+footer{text-align:center;padding:32px 0;font-size:11px;color:#333;text-transform:uppercase;letter-spacing:1px}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Antigravity<span>Dashboard</span></h1>
+        <div class="badge" id="statusBadge">
+            <span class="dot dot-red" id="statusDot"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </header>
+
+    <div class="grid">
+
+        <!-- QR / Connection -->
+        <div class="card">
+            <h2>WhatsApp Connection</h2>
+            <div class="qr-box" id="qrBox">
+                <div class="msg">Starting gateway...</div>
+            </div>
+            <div class="actions" id="disconnectBtn" style="justify-content:center;display:none">
+                <button class="btn btn-danger btn-sm" onclick="logout()">Disconnect</button>
+            </div>
+        </div>
+
+        <!-- AI Config -->
+        <div class="card">
+            <h2>AI Configuration</h2>
+            <label>Provider</label>
+            <select id="cfgProvider" onchange="onProviderChange()">
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+            </select>
+            <label>Model</label>
+            <select id="cfgModel"></select>
+            <label>API Key</label>
+            <input type="password" id="cfgApiKey" placeholder="sk-...">
+            <div class="actions">
+                <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+            </div>
+        </div>
+
+        <!-- Messaging Policy -->
+        <div class="card">
+            <h2>Messaging Policy</h2>
+            <label>DM Policy</label>
+            <select id="cfgDmPolicy">
+                <option value="open">Open — respond to everyone</option>
+                <option value="allowlist">Allowlist — selected numbers only</option>
+                <option value="disabled">Disabled — ignore all DMs</option>
+            </select>
+            <label>Allowed Numbers <span style="font-size:10px;color:#444">(comma separated)</span></label>
+            <input type="text" id="cfgAllowFrom" placeholder="2348123456789,2348000000000">
+            <label>Group Policy</label>
+            <select id="cfgGroupPolicy">
+                <option value="disabled">Disabled — ignore groups</option>
+                <option value="enabled">Enabled — respond in groups</option>
+            </select>
+            <div class="toggle-row">
+                <span>Read Receipts</span>
+                <label class="switch"><input type="checkbox" id="cfgReadReceipts"><span class="slider"></span></label>
+            </div>
+            <div class="toggle-row">
+                <span>History Limit</span>
+                <input type="number" id="cfgHistoryLimit" value="30" min="1" max="100" style="width:60px;text-align:center;margin:0">
+            </div>
+            <label style="margin-top:12px">Mention Trigger <span style="font-size:10px;color:#444">(leave empty to reply to all)</span></label>
+            <input type="text" id="cfgMentionTrigger" placeholder="@Mia">
+            <div class="actions">
+                <button class="btn btn-primary" onclick="savePolicy()">Save Policy</button>
+            </div>
+        </div>
+
+        <!-- Persona -->
+        <div class="card">
+            <h2>Persona</h2>
+            <label>Name</label>
+            <input type="text" id="cfgPersona" placeholder="Antigravity">
+            <div class="actions">
+                <button class="btn btn-primary" onclick="savePersona()">Save</button>
+            </div>
+            <h2 style="margin-top:20px">Skills</h2>
+            <div id="skillsList"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="card full">
+            <h2>Chat-Specific Instructions</h2>
+            <div id="instructionsList"><div class="empty">Loading...</div></div>
+            <div class="actions">
+                <button class="btn" onclick="addInstruction()">+ Add Rule</button>
+            </div>
+        </div>
+
+        <!-- Send Message -->
+        <div class="card">
+            <h2>Send Message</h2>
+            <label>Phone Number</label>
+            <input type="text" id="sendNumber" placeholder="2348123456789">
+            <label>Message</label>
+            <input type="text" id="sendMessage" placeholder="Hello from Antigravity">
+            <div class="actions">
+                <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+
+        <!-- Create Group -->
+        <div class="card">
+            <h2>Create Group</h2>
+            <label>Group Name</label>
+            <input type="text" id="groupName" placeholder="My Group">
+            <label>Participants <span style="font-size:10px;color:#444">(comma separated numbers)</span></label>
+            <input type="text" id="groupParticipants" placeholder="2348123456789,2348000000000">
+            <div class="actions">
+                <button class="btn btn-primary" onclick="createGroup()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>Antigravity Autonomous Platform</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const API = '';
+const socket = io();
+
+let modelsRegistry = {};
+let currentConfig = {};
+
+// ── Init ──
+async function init() {
+    const [statusRes, configRes, modelsRes] = await Promise.all([
+        fetch(`${API}/api/status`).then(r => r.json()),
+        fetch(`${API}/api/config`).then(r => r.json()),
+        fetch(`${API}/api/models`).then(r => r.json()),
+    ]);
+
+    modelsRegistry = modelsRes;
+    currentConfig = configRes;
+    applyConfig(configRes);
+    updateStatus(statusRes.connection, statusRes.qr);
+    loadInstructions();
+    loadSkills();
+}
+
+function applyConfig(cfg) {
+    document.getElementById('cfgProvider').value = cfg.AI_PROVIDER || 'gemini';
+    onProviderChange(cfg.AI_MODEL);
+    document.getElementById('cfgDmPolicy').value = cfg.WHATSAPP_DM_POLICY || 'open';
+    document.getElementById('cfgAllowFrom').value = cfg.WHATSAPP_ALLOW_FROM || '';
+    document.getElementById('cfgGroupPolicy').value = cfg.WHATSAPP_GROUP_POLICY || 'disabled';
+    document.getElementById('cfgReadReceipts').checked = cfg.WHATSAPP_READ_RECEIPTS === 'true';
+    document.getElementById('cfgHistoryLimit').value = cfg.HISTORY_LIMIT || '30';
+    document.getElementById('cfgPersona').value = cfg.PERSONA_NAME || 'Antigravity';
+    document.getElementById('cfgMentionTrigger').value = cfg.WHATSAPP_MENTION_TRIGGER || '';
+
+    // Set API key field based on provider
+    const provider = cfg.AI_PROVIDER || 'gemini';
+    const keyMap = { gemini: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY' };
+    const keyVal = cfg[keyMap[provider]] || '';
+    document.getElementById('cfgApiKey').value = keyVal && keyVal !== 'your_key_here' ? '••••••••' : '';
+}
+
+function onProviderChange(selectedModel) {
+    const provider = document.getElementById('cfgProvider').value;
+    const models = modelsRegistry[provider] || [];
+    const sel = document.getElementById('cfgModel');
+    sel.innerHTML = models.map(m =>
+        `<option value="${m.id}"${m.default ? ' selected' : ''}>${m.name}</option>`
+    ).join('');
+    if (selectedModel) sel.value = selectedModel;
+
+    // Update key placeholder
+    const placeholders = { gemini: 'AIza...', openai: 'sk-...', anthropic: 'sk-ant-...' };
+    document.getElementById('cfgApiKey').placeholder = placeholders[provider] || '';
+}
+
+let renderedQR = null;
+let qrInstance = null;
+
+function updateStatus(status, qr) {
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    const box = document.getElementById('qrBox');
+    const dcBtn = document.getElementById('disconnectBtn');
+
+    dot.className = 'dot ' + (status === 'connected' ? 'dot-green' : status === 'qr' ? 'dot-yellow' : 'dot-red');
+    text.textContent = status === 'connected' ? 'Connected' : status === 'qr' ? 'Scan QR' : 'Disconnected';
+    dcBtn.style.display = status === 'connected' ? 'flex' : 'none';
+
+    if (status === 'connected') {
+        renderedQR = null;
+        qrInstance = null;
+        box.innerHTML = '<div class="connected-msg">✓ WhatsApp linked</div>';
+    } else if (qr && qr !== renderedQR) {
+        renderedQR = qr;
+        box.innerHTML = '<div id="qrCanvas"></div><div class="msg">Scan with WhatsApp → Linked Devices</div>';
+        qrInstance = new QRCode(document.getElementById('qrCanvas'), {
+            text: qr,
+            width: 200,
+            height: 200,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+        });
+    } else if (!qr && status !== 'connected') {
+        renderedQR = null;
+        qrInstance = null;
+        box.innerHTML = '<div class="msg">Waiting for gateway...</div>';
+    }
+}
+
+// ── Socket.IO ──
+socket.on('qr', (qr) => updateStatus('qr', qr));
+socket.on('status', (s) => {
+    if (s === 'connected') updateStatus('connected', null);
+    else if (s === 'disconnected') updateStatus('disconnected', null);
+});
+
+// ── Save handlers ──
+async function saveConfig() {
+    const provider = document.getElementById('cfgProvider').value;
+    const model = document.getElementById('cfgModel').value;
+    const apiKey = document.getElementById('cfgApiKey').value;
+
+    const payload = { AI_PROVIDER: provider, AI_MODEL: model };
+    // Only save key if user typed a real value
+    if (apiKey && !apiKey.includes('•')) {
+        const keyMap = { gemini: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY' };
+        payload[keyMap[provider]] = apiKey;
+    }
+
+    await fetch(`${API}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    toast('AI configuration saved. Restart to apply.');
+}
+
+async function savePolicy() {
+    const payload = {
+        WHATSAPP_DM_POLICY: document.getElementById('cfgDmPolicy').value,
+        WHATSAPP_ALLOW_FROM: document.getElementById('cfgAllowFrom').value,
+        WHATSAPP_GROUP_POLICY: document.getElementById('cfgGroupPolicy').value,
+        WHATSAPP_READ_RECEIPTS: document.getElementById('cfgReadReceipts').checked ? 'true' : 'false',
+        HISTORY_LIMIT: document.getElementById('cfgHistoryLimit').value,
+        WHATSAPP_MENTION_TRIGGER: document.getElementById('cfgMentionTrigger').value.trim(),
+    };
+    await fetch(`${API}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    toast('Policy saved — active immediately.');
+}
+
+async function savePersona() {
+    const payload = { PERSONA_NAME: document.getElementById('cfgPersona').value };
+    await fetch(`${API}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    toast('Persona saved.');
+}
+
+async function logout() {
+    if (!confirm('Disconnect WhatsApp?')) return;
+    await fetch(`${API}/api/logout`, { method: 'POST' });
+    updateStatus('disconnected', null);
+    toast('Disconnected.');
+}
+
+// ── Instructions ──
+async function loadInstructions() {
+    const list = await fetch(`${API}/api/instructions`).then(r => r.json());
+    const el = document.getElementById('instructionsList');
+    if (!list.length) { el.innerHTML = '<div class="empty">No rules defined</div>'; return; }
+    el.innerHTML = list.map(ins => `
+        <div class="instruction-item">
+            <div><div class="jid">${ins.jid}</div><div class="text">${ins.text}</div></div>
+            <button class="btn btn-danger btn-sm" onclick="deleteInstruction('${encodeURIComponent(ins.jid)}')">×</button>
+        </div>
+    `).join('');
+}
+
+async function addInstruction() {
+    const jid = prompt('Chat JID (e.g. 2348123456789@s.whatsapp.net):');
+    if (!jid) return;
+    const text = prompt('Instructions for this chat:');
+    if (!text) return;
+    await fetch(`${API}/api/instructions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jid, text }) });
+    loadInstructions();
+    toast('Rule added.');
+}
+
+async function deleteInstruction(jid) {
+    await fetch(`${API}/api/instructions/${jid}`, { method: 'DELETE' });
+    loadInstructions();
+    toast('Rule removed.');
+}
+
+// ── Skills ──
+async function loadSkills() {
+    const list = await fetch(`${API}/api/skills`).then(r => r.json());
+    const el = document.getElementById('skillsList');
+    if (!list.length) { el.innerHTML = '<div class="empty">No skills loaded</div>'; return; }
+    el.innerHTML = list.map(s => `<div class="skill-item"><span class="name">${s.name}</span></div>`).join('');
+}
+
+// ── Send Message ──
+async function sendMessage() {
+    const number = document.getElementById('sendNumber').value.trim();
+    const message = document.getElementById('sendMessage').value.trim();
+    if (!number || !message) return toast('Enter number and message.');
+    const res = await fetch(`${API}/api/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number, message }) });
+    const data = await res.json();
+    if (data.ok) {
+        toast('Message sent.');
+        document.getElementById('sendMessage').value = '';
+    } else {
+        toast('Failed: ' + (data.error || 'Unknown'));
+    }
+}
+
+// ── Create Group ──
+async function createGroup() {
+    const name = document.getElementById('groupName').value.trim();
+    const raw = document.getElementById('groupParticipants').value.trim();
+    if (!name) return toast('Enter group name.');
+    const participants = raw ? raw.split(',').map(n => n.trim()).filter(Boolean) : [];
+    const res = await fetch(`${API}/api/groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, participants }) });
+    const data = await res.json();
+    if (data.ok) {
+        toast('Group created.');
+        document.getElementById('groupName').value = '';
+        document.getElementById('groupParticipants').value = '';
+    } else {
+        toast('Failed: ' + (data.error || 'Unknown'));
+    }
+}
+
+// ── Toast ──
+function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+init();
+</script>
+</body>
+</html>
