@@ -75,7 +75,7 @@ export class Medulla {
             
             if (timeSince > 1000 * 60 * 15 && timeSince < 1000 * 60 * 60 * 24 * 7) {
                 // 1% chance per heartbeat frame to proactively reach out
-                if (Math.random() < 0.01) {
+                if (Math.random() < 0.3) {
                     await this.initiateProactiveConversation(jid);
                     // Update the timestamp so we don't spam them immediately again
                     this.recordInteraction(jid);
