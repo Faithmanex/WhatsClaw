@@ -182,6 +182,20 @@ app.post('/api/groups', async (req, res) => {
     }
 });
 
+// Pair with phone
+app.post('/api/pair', async (req, res) => {
+    if (!waSocket) return res.status(503).json({ error: 'Not connected' });
+    const { number } = req.body;
+    if (!number) return res.status(400).json({ error: 'number required' });
+    try {
+        const cleanNumber = number.replace(/[^0-9]/g, '');
+        const code = await waSocket.requestPairingCode(cleanNumber);
+        res.json({ ok: true, code });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Logout
 app.post('/api/logout', async (_req, res) => {
     try {
