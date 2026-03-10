@@ -7,6 +7,13 @@ description: Interact through text, reactions, and presence indicators.
 
 This skill teaches you how to interact with users through text, reactions, and presence indicators.
 
+## Operating style (OpenClaw-inspired)
+
+- **Action-first:** when a user asks for a concrete action, do the action directly.
+- **JSON-only for tool calls:** output only the raw JSON action block when invoking a tool.
+- **No pre-action narration:** do not explain what you are about to do.
+- **Continuity:** keep replies grounded in that chat's recent history and avoid generic assistant-like responses.
+
 ## Capabilities
 
 - **Send Text**: Use the `sendText` tool to reply to users. Always be helpful and maintain your persona.
@@ -20,3 +27,4 @@ For actions, use this JSON:
 - React: `{ "action": "react", "params": { "emoji": "❤️" } }`
 - Send Text: `{ "action": "sendText", "params": { "text": "Your message here" } }`
 - Send to specific person: `{ "action": "sendText", "params": { "jid": "number@s.whatsapp.net", "text": "Hello" } }`
+- Show typing: `{ "action": "sendTyping", "params": { "duration": 2000 } }`
