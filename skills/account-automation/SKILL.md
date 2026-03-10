@@ -10,7 +10,15 @@ This skill allows you to manage your own WhatsApp presence and status.
 ## Capabilities
 
 - **Update Status**: Change your "About" or profile status.
-- **Update Presence**: Change whether you appear as "Available", "Unavailable", etc.
+- **Update Presence**: Change whether you appear as available or unavailable.
+
+## Usage
+
+- Update status:
+`{ "action": "updateStatus", "params": { "status": "busy rn, ping me later" } }`
+
+- Set presence:
+`{ "action": "setPresence", "params": { "presence": "available" } }`
 
 ## Instructions
 

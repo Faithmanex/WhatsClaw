@@ -21,6 +21,7 @@ import { MessageSkill } from './skills/MessageSkill';
 import { GroupSkill } from './skills/GroupSkill';
 import { FileSkill } from './skills/FileSkill';
 import { CommandSkill } from './skills/CommandSkill';
+import { AccountSkill } from './skills/AccountSkill';
 import { AIProvider, Message } from './types/ai';
 import { Medulla } from './core/brain/Medulla';
 import { sanitizeJid } from './utils/JidUtils';
@@ -304,22 +305,14 @@ async function connectToWhatsApp() {
             // 1. If message is sent by the user themselves (or the AI on their behalf),
             // we save it to history so the AI has context of what "You" said, but we don't reply to it.
             if (msg.key.fromMe) {
-                const history = await historyManager.getHistory(remoteJid);
-                if (!history.some(h => h.key.id === msg.key.id)) {
-                    history.push(msg);
-                    await historyManager.saveHistory(remoteJid, history);
-                }
+                await historyManager.appendIfMissing(remoteJid, msg);
                 continue;
             }
 
             // 1.5 If it's an appended message (e.g. historical sync from another device)
             // Save it to history to build context, but do NOT trigger an AI response.
             if (m.type === 'append') {
-                const history = await historyManager.getHistory(remoteJid);
-                if (!history.some(h => h.key.id === msg.key.id)) {
-                    history.push(msg);
-                    await historyManager.saveHistory(remoteJid, history);
-                }
+                await historyManager.appendIfMissing(remoteJid, msg);
                 continue;
             }
 
@@ -362,21 +355,18 @@ async function connectToWhatsApp() {
             try {
                 cognition.processEmotion(body);
                 const limit = parseInt(process.env.HISTORY_LIMIT || '30');
-                const rawHistory = await historyManager.getHistory(remoteJid);
+                // Save incoming first so this message immediately becomes part of this chat's history.
+                const rawHistory = await historyManager.appendIfMissing(remoteJid, msg);
 
                 // Build context summary — inject as system prompt, NOT as conversation turns
                 const recentMessages = rawHistory.slice(-limit).map(h => {
-                    const sender = h.key.participant || h.key.remoteJid!;
+                    const sender = sanitizeJid(h.key.participant || h.key.remoteJid || remoteJid);
                     const name = contactManager.getContactName(sender) || sender.split('@')[0];
                     const who = h.key.fromMe ? 'You' : name;
                     const text = h.message?.conversation || h.message?.extendedTextMessage?.text || '';
-                    return `${who}: ${text}`;
-                }).filter(line => line.endsWith(': ') === false).join('\n');
-
-                // Save the incoming message immediately so that any replies we generate
-                // get appended *after* this message in the history.
-                rawHistory.push(msg);
-                await historyManager.saveHistory(remoteJid, rawHistory);
+                    const ts = h.messageTimestamp ? new Date(Number(h.messageTimestamp) * 1000).toISOString() : '';
+                    return text ? `[${ts || 'unknown-time'}] ${who}: ${text}` : '';
+                }).filter(Boolean).join('\n');
                 
                 if (medulla) medulla.recordInteraction(remoteJid);
 
@@ -391,6 +381,8 @@ async function connectToWhatsApp() {
                 if (contactName) {
                     systemPrompt += `\n\n[USER IDENTITY]\nYou are currently talking to: ${contactName}. Use their name naturally.`;
                 }
+
+                systemPrompt += `\n\n[CHAT CONTEXT]\n- Current chat id: ${remoteJid}\n- Chat type: ${isGroup ? 'group' : 'direct'}\n- Keep continuity with this chat's own history only.\n- Avoid generic replies; reference recent details, names, and ongoing threads from this specific chat when relevant.`;
 
                 const customInstruction = await instructionsManager.getInstruction(remoteJid);
                 if (customInstruction) {
@@ -443,7 +435,7 @@ async function connectToWhatsApp() {
                                 case 'react':
                                     await msgSkill.react(remoteJid, msg.key, action.params.emoji);
                                     break;
-                                case 'sendText':
+                                case 'sendText': {
                                     const target = action.params.jid || remoteJid;
                                     const sentActionMsg = await msgSkill.sendText(target, action.params.text);
                                     if (sentActionMsg && target === remoteJid) {
@@ -451,22 +443,66 @@ async function connectToWhatsApp() {
                                         await historyManager.saveHistory(remoteJid, rawHistory);
                                     }
                                     break;
-                                case 'createGroup':
-                                    const groupSkill = new GroupSkill(sock);
-                                    await groupSkill.createGroup(action.params.name, action.params.participants);
+                                }
+                                case 'sendTyping':
+                                    await msgSkill.sendTyping(action.params.jid || remoteJid, action.params.duration || 2000);
                                     break;
-                                case 'readFile':
+                                case 'createGroup': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    await groupSkill.createGroup(action.params.name, action.params.participants || []);
+                                    break;
+                                }
+                                case 'promote': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    await groupSkill.promote(action.params.groupId || remoteJid, action.params.participants || [action.params.jid]);
+                                    break;
+                                }
+                                case 'demote': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    await groupSkill.demote(action.params.groupId || remoteJid, action.params.participants || [action.params.jid]);
+                                    break;
+                                }
+                                case 'add': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    await groupSkill.add(action.params.groupId || remoteJid, action.params.participants || [action.params.jid]);
+                                    break;
+                                }
+                                case 'remove': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    await groupSkill.remove(action.params.groupId || remoteJid, action.params.participants || [action.params.jid]);
+                                    break;
+                                }
+                                case 'inviteLink': {
+                                    const groupSkill = new GroupSkill(sock);
+                                    const code = await groupSkill.inviteLink(action.params.groupId || remoteJid);
+                                    await msgSkill.sendText(remoteJid, `https://chat.whatsapp.com/${code}`, msg);
+                                    break;
+                                }
+                                case 'updateStatus': {
+                                    const accountSkill = new AccountSkill(sock);
+                                    await accountSkill.updateStatus(action.params.status);
+                                    break;
+                                }
+                                case 'setPresence': {
+                                    const accountSkill = new AccountSkill(sock);
+                                    await accountSkill.setPresence(action.params.presence);
+                                    break;
+                                }
+                                case 'readFile': {
                                     const fileReadSkill = new FileSkill(sock);
                                     await fileReadSkill.readFile(remoteJid, action.params.path, msg.key);
                                     break;
-                                case 'editFile':
+                                }
+                                case 'editFile': {
                                     const fileEditSkill = new FileSkill(sock);
                                     await fileEditSkill.editFile(remoteJid, action.params.path, action.params.content, msg.key);
                                     break;
-                                case 'executeCommand':
+                                }
+                                case 'executeCommand': {
                                     const commandSkill = new CommandSkill(sock);
                                     await commandSkill.executeCommand(remoteJid, action.params.command, msg.key);
                                     break;
+                                }
                                 case 'storeMemory':
                                     cognition.hippocampus.commitToLongTermMemory(remoteJid, action.params.fact, action.params.context);
                                     console.log(`🧠 [Hippocampus] Stored new fact for ${remoteJid}: ${action.params.fact}`);
