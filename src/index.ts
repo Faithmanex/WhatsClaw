@@ -25,6 +25,7 @@ import { AccountSkill } from './skills/AccountSkill';
 import { AIProvider, Message } from './types/ai';
 import { Medulla } from './core/brain/Medulla';
 import { sanitizeJid } from './utils/JidUtils';
+import { runtimeConfig } from './config/runtimeConfig';
 
 dotenv.config();
 
@@ -53,27 +54,38 @@ let connectionStatus: string = 'disconnected';
 let waSocket: any = null;
 let bootLogged = false;
 let medulla: Medulla | null = null;
+let activeAIProvider: AIProvider | null = null;
+let activeMessageSkill: MessageSkill | null = null;
 
-// ── .env read/write helpers ──
-const ENV_PATH = path.resolve('.env');
+function buildAIProviderFromConfig(): AIProvider {
+    const providerType = runtimeConfig.get('AI_PROVIDER', 'gemini');
+    const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
 
-function readEnv(): Record<string, string> {
-    if (!fs.existsSync(ENV_PATH)) return {};
-    const raw = fs.readFileSync(ENV_PATH, 'utf-8');
-    const env: Record<string, string> = {};
-    for (const line of raw.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx === -1) continue;
-        env[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+    switch (providerType) {
+        case 'openai':
+            return new OpenAIProvider(runtimeConfig.get('OPENAI_API_KEY'), modelId);
+        case 'anthropic':
+            return new AnthropicProvider(runtimeConfig.get('ANTHROPIC_API_KEY'), modelId);
+        default:
+            return new GeminiProvider(runtimeConfig.get('GEMINI_API_KEY'), modelId);
     }
-    return env;
 }
 
-function writeEnv(env: Record<string, string>) {
-    const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
-    fs.writeFileSync(ENV_PATH, lines.join('\n') + '\n');
+function refreshAIProvider() {
+    activeAIProvider = buildAIProviderFromConfig();
+
+    if (!bootLogged) {
+        const providerType = runtimeConfig.get('AI_PROVIDER', 'gemini');
+        const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
+        console.log(`AI: ${providerType} → ${modelId}`);
+        bootLogged = true;
+    }
+
+    if (waSocket && activeMessageSkill && activeAIProvider) {
+        if (medulla) medulla.stopHeartbeat();
+        medulla = new Medulla(waSocket, activeAIProvider, cognition, historyManager, activeMessageSkill);
+        medulla.startHeartbeat(60000);
+    }
 }
 
 // ── API Routes ──
@@ -84,25 +96,19 @@ app.get('/api/status', (_req, res) => {
         connection: connectionStatus,
         qr: currentQR,
         heartbeat: cognition.getHeartbeat(),
-        provider: process.env.AI_PROVIDER || 'gemini',
-        model: process.env.AI_MODEL || resolveModel(process.env.AI_PROVIDER || 'gemini'),
+        provider: runtimeConfig.get('AI_PROVIDER', 'gemini'),
+        model: runtimeConfig.get('AI_MODEL') || resolveModel(runtimeConfig.get('AI_PROVIDER', 'gemini')),
     });
 });
 
 // Config CRUD
 app.get('/api/config', (_req, res) => {
-    const env = readEnv();
-    res.json(env);
+    res.json(runtimeConfig.getAll());
 });
 
 app.post('/api/config', (req, res) => {
-    const current = readEnv();
-    const updated = { ...current, ...req.body };
-    writeEnv(updated);
-    // Sync process.env
-    for (const [k, v] of Object.entries(updated)) {
-        process.env[k] = v as string;
-    }
+    const updated = runtimeConfig.update(req.body || {});
+    refreshAIProvider();
     res.json({ ok: true, config: updated });
 });
 
@@ -236,30 +242,8 @@ async function connectToWhatsApp() {
     });
     waSocket = sock;
 
-    const msgSkill = new MessageSkill(sock);
-
-    const providerType = process.env.AI_PROVIDER || 'gemini';
-    const modelId = resolveModel(providerType, process.env.AI_MODEL);
-    let aiProvider: AIProvider;
-
-    switch (providerType) {
-        case 'openai':
-            aiProvider = new OpenAIProvider(process.env.OPENAI_API_KEY || '', modelId);
-            break;
-        case 'anthropic':
-            aiProvider = new AnthropicProvider(process.env.ANTHROPIC_API_KEY || '', modelId);
-            break;
-        default:
-            aiProvider = new GeminiProvider(process.env.GEMINI_API_KEY || '', modelId);
-    }
-    if (!bootLogged) {
-        console.log(`AI: ${providerType} → ${modelId}`);
-        bootLogged = true;
-    }
-
-    if (medulla) medulla.stopHeartbeat();
-    medulla = new Medulla(sock, aiProvider, cognition, historyManager, msgSkill);
-    medulla.startHeartbeat(60000); // Check for proactive triggers every 60s
+    activeMessageSkill = new MessageSkill(sock);
+    refreshAIProvider();
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -320,14 +304,14 @@ async function connectToWhatsApp() {
             const isGroup = remoteJid.endsWith('@g.us');
             const senderNumber = remoteJid.split('@')[0];
 
-            const groupPolicy = process.env.WHATSAPP_GROUP_POLICY || 'disabled';
+            const groupPolicy = runtimeConfig.get('WHATSAPP_GROUP_POLICY', 'disabled');
             if (isGroup && groupPolicy === 'disabled') continue;
 
             if (!isGroup) {
-                const dmPolicy = process.env.WHATSAPP_DM_POLICY || 'open';
+                const dmPolicy = runtimeConfig.get('WHATSAPP_DM_POLICY', 'open');
                 if (dmPolicy === 'disabled') continue;
                 if (dmPolicy === 'allowlist') {
-                    const allowList = (process.env.WHATSAPP_ALLOW_FROM || '').split(',').map(n => n.trim());
+                    const allowList = runtimeConfig.get('WHATSAPP_ALLOW_FROM').split(',').map(n => n.trim()).filter(Boolean);
                     if (!allowList.includes(senderNumber)) continue;
                 }
             }
@@ -341,7 +325,7 @@ async function connectToWhatsApp() {
                 }
             }
 
-            if (process.env.WHATSAPP_READ_RECEIPTS === 'true') {
+            if (runtimeConfig.get('WHATSAPP_READ_RECEIPTS', 'true') === 'true') {
                 await sock.readMessages([msg.key]);
             }
 
@@ -349,12 +333,12 @@ async function connectToWhatsApp() {
             if (!body) continue;
 
             // Mention trigger filter
-            const mentionTrigger = process.env.WHATSAPP_MENTION_TRIGGER;
+            const mentionTrigger = runtimeConfig.get('WHATSAPP_MENTION_TRIGGER');
             if (mentionTrigger && !body.toLowerCase().includes(mentionTrigger.toLowerCase())) continue;
 
             try {
                 cognition.processEmotion(body);
-                const limit = parseInt(process.env.HISTORY_LIMIT || '30');
+                const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
                 // Save incoming first so this message immediately becomes part of this chat's history.
                 const rawHistory = await historyManager.appendIfMissing(remoteJid, msg);
 
@@ -370,7 +354,8 @@ async function connectToWhatsApp() {
                 
                 if (medulla) medulla.recordInteraction(remoteJid);
 
-                await msgSkill.sendTyping(remoteJid);
+                if (!activeMessageSkill || !activeAIProvider) continue;
+                await activeMessageSkill.sendTyping(remoteJid);
 
                 let systemPrompt = cognition.getSystemPrompt(remoteJid);
                 const globalSkills = await skillManager.getAllSkills();
@@ -393,7 +378,7 @@ async function connectToWhatsApp() {
                     systemPrompt += `\n\n[CONVERSATION HISTORY — for context only, do NOT repeat or re-answer these]:\n${recentMessages}`;
                 }
 
-                const response = await aiProvider.generateResponse(
+                const response = await activeAIProvider.generateResponse(
                     [{ role: 'system', content: systemPrompt }],
                     body
                 );
@@ -433,11 +418,11 @@ async function connectToWhatsApp() {
 
                             switch (action.action) {
                                 case 'react':
-                                    await msgSkill.react(remoteJid, msg.key, action.params.emoji);
+                                    await activeMessageSkill.react(remoteJid, msg.key, action.params.emoji);
                                     break;
                                 case 'sendText': {
                                     const target = action.params.jid || remoteJid;
-                                    const sentActionMsg = await msgSkill.sendText(target, action.params.text);
+                                    const sentActionMsg = await activeMessageSkill.sendText(target, action.params.text);
                                     if (sentActionMsg && target === remoteJid) {
                                         rawHistory.push(sentActionMsg);
                                         await historyManager.saveHistory(remoteJid, rawHistory);
@@ -445,7 +430,7 @@ async function connectToWhatsApp() {
                                     break;
                                 }
                                 case 'sendTyping':
-                                    await msgSkill.sendTyping(action.params.jid || remoteJid, action.params.duration || 2000);
+                                    await activeMessageSkill.sendTyping(action.params.jid || remoteJid, action.params.duration || 2000);
                                     break;
                                 case 'createGroup': {
                                     const groupSkill = new GroupSkill(sock);
@@ -475,7 +460,7 @@ async function connectToWhatsApp() {
                                 case 'inviteLink': {
                                     const groupSkill = new GroupSkill(sock);
                                     const code = await groupSkill.inviteLink(action.params.groupId || remoteJid);
-                                    await msgSkill.sendText(remoteJid, `https://chat.whatsapp.com/${code}`, msg);
+                                    await activeMessageSkill.sendText(remoteJid, `https://chat.whatsapp.com/${code}`, msg);
                                     break;
                                 }
                                 case 'updateStatus': {
@@ -520,7 +505,7 @@ async function connectToWhatsApp() {
 
                 // Only send text if there's remaining non-JSON content
                 if (cleanResponse) {
-                    const sentCleanMsg = await msgSkill.sendText(remoteJid, cleanResponse, msg);
+                    const sentCleanMsg = await activeMessageSkill.sendText(remoteJid, cleanResponse, msg);
                     if (sentCleanMsg) {
                         rawHistory.push(sentCleanMsg);
                         await historyManager.saveHistory(remoteJid, rawHistory);
@@ -530,8 +515,10 @@ async function connectToWhatsApp() {
                 const status = error?.status || error?.statusCode || error?.response?.status;
                 const errMsg = error?.message || '';
                 if (status === 429 || errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('quota')) {
-                    console.error(`⚠️  RATE LIMITED by ${process.env.AI_PROVIDER || 'gemini'}. Slow down or upgrade your plan.`);
-                    await msgSkill.sendText(remoteJid, '⏳ I\'m being rate limited right now. Try again in a moment.', msg);
+                    console.error(`⚠️  RATE LIMITED by ${runtimeConfig.get('AI_PROVIDER', 'gemini')}. Slow down or upgrade your plan.`);
+                    if (activeMessageSkill) {
+                        await activeMessageSkill.sendText(remoteJid, '⏳ I\'m being rate limited right now. Try again in a moment.', msg);
+                    }
                 } else {
                     console.error('Message error:', error);
                 }

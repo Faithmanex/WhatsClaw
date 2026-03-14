@@ -5,6 +5,7 @@ import { HistoryManager } from '../../utils/HistoryManager';
 import { CognitionEngine } from '../CognitionEngine';
 import fs from 'fs';
 import path from 'path';
+import { runtimeConfig } from '../../config/runtimeConfig';
 
 /**
  * Medulla Oblongata: Autonomic Nervous System.
@@ -90,7 +91,7 @@ export class Medulla {
         
         try {
             const history = await this.historyManager.getHistory(jid);
-            const limit = parseInt(process.env.HISTORY_LIMIT || '30');
+            const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
             
             const recentMessages = history.slice(-limit).map(h => {
                 const who = h.key.fromMe ? 'You' : 'User';
