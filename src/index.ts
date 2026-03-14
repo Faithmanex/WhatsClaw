@@ -338,7 +338,6 @@ async function connectToWhatsApp() {
 
             try {
                 cognition.processEmotion(body);
-                cognition.hippocampus.extractAndStoreFromMessage(remoteJid, body);
                 const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
                 // Save incoming first so this message immediately becomes part of this chat's history.
                 const rawHistory = await historyManager.appendIfMissing(remoteJid, msg);
