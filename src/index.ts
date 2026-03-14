@@ -357,7 +357,7 @@ async function connectToWhatsApp() {
                 if (!activeMessageSkill || !activeAIProvider) continue;
                 await activeMessageSkill.sendTyping(remoteJid);
 
-                let systemPrompt = cognition.getSystemPrompt(remoteJid);
+                let systemPrompt = cognition.getSystemPrompt(remoteJid, body);
                 const globalSkills = await skillManager.getAllSkills();
                 systemPrompt += `\n\n${globalSkills}`;
                 
@@ -489,7 +489,7 @@ async function connectToWhatsApp() {
                                     break;
                                 }
                                 case 'storeMemory':
-                                    cognition.hippocampus.commitToLongTermMemory(remoteJid, action.params.fact, action.params.context);
+                                    cognition.hippocampus.commitToLongTermMemory(remoteJid, action.params.fact, action.params.context || 'manual-store', action.params.tags || [], action.params.importance || 0.8);
                                     console.log(`🧠 [Hippocampus] Stored new fact for ${remoteJid}: ${action.params.fact}`);
                                     break;
                                 case 'saveContact':

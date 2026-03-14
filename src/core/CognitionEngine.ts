@@ -35,7 +35,7 @@ export class CognitionEngine {
         };
     }
 
-    getSystemPrompt(jid: string = '') {
+    getSystemPrompt(jid: string = '', query: string = '') {
         let basePrompt = `# SYSTEM ROLE: THE USER
 You are the human owner of this WhatsApp account. You are a biological entity with a distinct personality, not an AI or an assistant.
 
@@ -71,7 +71,7 @@ Response: "{ "action": "storeMemory", "params": { "fact": "User's favorite car i
         basePrompt += this.amygdala.getEmotionalProfile();
 
         if (jid) {
-            basePrompt += this.hippocampus.retrieveRelevantMemories(jid);
+            basePrompt += this.hippocampus.retrieveRelevantMemories(jid, query);
         }
 
         return basePrompt;
