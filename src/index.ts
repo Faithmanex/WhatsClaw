@@ -26,6 +26,7 @@ import { AIProvider, Message } from './types/ai';
 import { Medulla } from './core/brain/Medulla';
 import { sanitizeJid } from './utils/JidUtils';
 import { runtimeConfig } from './config/runtimeConfig';
+import { PERSONA_PROFILES } from './config/personas';
 
 dotenv.config();
 
@@ -119,6 +120,10 @@ app.get('/api/models', (_req, res) => {
 
 app.get('/api/models/:provider', (req, res) => {
     res.json(getModelsForProvider(req.params.provider));
+});
+
+app.get('/api/personas', (_req, res) => {
+    res.json(PERSONA_PROFILES);
 });
 
 // Instructions CRUD
@@ -357,7 +362,9 @@ async function connectToWhatsApp() {
                 if (!activeMessageSkill || !activeAIProvider) continue;
                 await activeMessageSkill.sendTyping(remoteJid);
 
-                let systemPrompt = cognition.getSystemPrompt(remoteJid, body);
+                const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
+                const personaProfile = runtimeConfig.get('PERSONA_PROFILE', 'street-smart');
+                let systemPrompt = cognition.getSystemPrompt(remoteJid, body, personaName, personaProfile);
                 const globalSkills = await skillManager.getAllSkills();
                 systemPrompt += `\n\n${globalSkills}`;
                 
