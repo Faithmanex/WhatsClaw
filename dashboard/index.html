@@ -302,6 +302,14 @@
         font-weight: 500;
         color: var(--text);
       }
+
+      .persona-definition {
+        margin-top: -4px;
+        margin-bottom: 12px;
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
       .toast {
         position: fixed;
         bottom: 20px;
@@ -472,6 +480,9 @@
           <h2>Persona</h2>
           <label>Name</label>
           <input type="text" id="cfgPersona" placeholder="Antigravity" />
+          <label>Personality</label>
+          <select id="cfgPersonaProfile" onchange="updatePersonaDefinition()"></select>
+          <div class="persona-definition" id="cfgPersonaDefinition">Choose a personality style.</div>
           <div class="actions">
             <button class="btn btn-primary" onclick="savePersona()">
               Save
@@ -544,17 +555,20 @@
       const socket = io();
 
       let modelsRegistry = {};
+      let personaProfiles = [];
       let currentConfig = {};
 
       // ── Init ──
       async function init() {
-        const [statusRes, configRes, modelsRes] = await Promise.all([
+        const [statusRes, configRes, modelsRes, personasRes] = await Promise.all([
           fetch(`${API}/api/status`).then((r) => r.json()),
           fetch(`${API}/api/config`).then((r) => r.json()),
           fetch(`${API}/api/models`).then((r) => r.json()),
+          fetch(`${API}/api/personas`).then((r) => r.json()),
         ]);
 
         modelsRegistry = modelsRes;
+        personaProfiles = personasRes;
         currentConfig = configRes;
         applyConfig(configRes);
         updateStatus(statusRes.connection, statusRes.qr);
@@ -578,6 +592,7 @@
           cfg.HISTORY_LIMIT || "30";
         document.getElementById("cfgPersona").value =
           cfg.PERSONA_NAME || "Antigravity";
+        renderPersonaOptions(cfg.PERSONA_PROFILE || "street-smart");
         document.getElementById("cfgMentionTrigger").value =
           cfg.WHATSAPP_MENTION_TRIGGER || "";
 
@@ -591,6 +606,35 @@
         const keyVal = cfg[keyMap[provider]] || "";
         document.getElementById("cfgApiKey").value =
           keyVal && keyVal !== "your_key_here" ? "••••••••" : "";
+      }
+
+      function renderPersonaOptions(selectedProfile) {
+        const sel = document.getElementById("cfgPersonaProfile");
+        if (!sel) return;
+        sel.innerHTML = personaProfiles
+          .map(
+            (p) =>
+              `<option value="${p.id}" title="${p.description}">${p.label}</option>`
+          )
+          .join("");
+
+        if (selectedProfile) {
+          sel.value = selectedProfile;
+        }
+
+        updatePersonaDefinition();
+      }
+
+      function updatePersonaDefinition() {
+        const sel = document.getElementById("cfgPersonaProfile");
+        const desc = document.getElementById("cfgPersonaDefinition");
+        if (!sel || !desc) return;
+
+        const selectedId = sel.value;
+        const selected = personaProfiles.find((p) => p.id === selectedId);
+        desc.textContent = selected
+          ? selected.description
+          : "Choose a personality style.";
       }
 
       function onProviderChange(selectedModel) {
@@ -726,13 +770,14 @@
       async function savePersona() {
         const payload = {
           PERSONA_NAME: document.getElementById("cfgPersona").value,
+          PERSONA_PROFILE: document.getElementById("cfgPersonaProfile").value,
         };
         await fetch(`${API}/api/config`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        toast("Persona saved.");
+        toast("Persona saved — active immediately.");
       }
 
       async function logout() {
