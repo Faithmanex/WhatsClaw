@@ -5,6 +5,7 @@ import { HistoryManager } from '../../utils/HistoryManager';
 import { CognitionEngine } from '../CognitionEngine';
 import fs from 'fs';
 import path from 'path';
+import { runtimeConfig } from '../../config/runtimeConfig';
 
 /**
  * Medulla Oblongata: Autonomic Nervous System.
@@ -90,7 +91,7 @@ export class Medulla {
         
         try {
             const history = await this.historyManager.getHistory(jid);
-            const limit = parseInt(process.env.HISTORY_LIMIT || '30');
+            const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
             
             const recentMessages = history.slice(-limit).map(h => {
                 const who = h.key.fromMe ? 'You' : 'User';
@@ -98,16 +99,11 @@ export class Medulla {
                 return `${who}: ${text}`;
             }).filter(line => line.endsWith(': ') === false).join('\n');
 
-            let prompt = this.cognition.getSystemPrompt(jid);
+            let prompt = this.cognition.getSystemPrompt(jid, "proactive check-in");
             
-            // Allow it to randomly remember someone's specific facts
-            const memories = this.cognition.hippocampus.retrieveRelevantMemories(jid);
 
             prompt += `\n\n[MEDULLA OBLONGATA (AUTONOMIC OVERRIDE)]\nYou are initiating a **proactive** conversation. The user did NOT just message you. Your goal is to start a conversation natively, check up on them, or mention something relevant from the past. Do not say "I am a bot reaching out", just text them like a normal human friend would out of the blue.`;
             
-            if (memories) {
-                prompt += `\n\n[RANDOM MEMORY TRIGGER]\nYou just remembered these facts about the user. Feel free to bring them up naturally if it makes sense:\n${memories}`;
-            }
 
             if (recentMessages) {
                 prompt += `\n\n[CONVERSATION HISTORY — For context context]:\n${recentMessages}`;
