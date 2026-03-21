@@ -16,6 +16,7 @@ import { ContactManager } from './utils/ContactManager';
 import { GeminiProvider } from './ai/GeminiProvider';
 import { OpenAIProvider } from './ai/OpenAIProvider';
 import { AnthropicProvider } from './ai/AnthropicProvider';
+import { NvidiaProvider } from './ai/NvidiaProvider';
 import { resolveModel, MODEL_REGISTRY, getModelsForProvider } from './config/models';
 import { MessageSkill } from './skills/MessageSkill';
 import { GroupSkill } from './skills/GroupSkill';
@@ -67,6 +68,8 @@ function buildAIProviderFromConfig(): AIProvider {
             return new OpenAIProvider(runtimeConfig.get('OPENAI_API_KEY'), modelId);
         case 'anthropic':
             return new AnthropicProvider(runtimeConfig.get('ANTHROPIC_API_KEY'), modelId);
+        case 'nvidia':
+            return new NvidiaProvider(runtimeConfig.get('NVIDIA_API_KEY'), modelId);
         default:
             return new GeminiProvider(runtimeConfig.get('GEMINI_API_KEY'), modelId);
     }
