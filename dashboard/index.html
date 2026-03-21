@@ -407,6 +407,7 @@
             <option value="gemini">Gemini</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
+            <option value="nvidia">Nvidia</option>
           </select>
           <label>Model</label>
           <select id="cfgModel"></select>
@@ -602,6 +603,7 @@
           gemini: "GEMINI_API_KEY",
           openai: "OPENAI_API_KEY",
           anthropic: "ANTHROPIC_API_KEY",
+          nvidia: "NVIDIA_API_KEY",
         };
         const keyVal = cfg[keyMap[provider]] || "";
         document.getElementById("cfgApiKey").value =
@@ -656,6 +658,7 @@
           gemini: "AIza...",
           openai: "sk-...",
           anthropic: "sk-ant-...",
+          nvidia: "nvapi-...",
         };
         document.getElementById("cfgApiKey").placeholder =
           placeholders[provider] || "";
@@ -732,6 +735,7 @@
             gemini: "GEMINI_API_KEY",
             openai: "OPENAI_API_KEY",
             anthropic: "ANTHROPIC_API_KEY",
+            nvidia: "NVIDIA_API_KEY",
           };
           payload[keyMap[provider]] = apiKey;
         }
