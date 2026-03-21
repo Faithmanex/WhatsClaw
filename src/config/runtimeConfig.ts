@@ -6,11 +6,12 @@ const RUNTIME_CONFIG_PATH = path.resolve('runtime-config.json');
 const ENV_PATH = path.resolve('.env');
 
 const DEFAULT_CONFIG: Record<string, string> = {
-    AI_PROVIDER: 'gemini',
-    AI_MODEL: '',
+    AI_PROVIDER: 'nvidia',
+    AI_MODEL: 'qwen/qwen3.5-122b-a10b',
     GEMINI_API_KEY: '',
     OPENAI_API_KEY: '',
     ANTHROPIC_API_KEY: '',
+    NVIDIA_API_KEY: '',
     PERSONA_NAME: 'Antigravity',
     PERSONA_PROFILE: 'street-smart',
     HISTORY_LIMIT: '30',

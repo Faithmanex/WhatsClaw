@@ -16,6 +16,7 @@ import { ContactManager } from './utils/ContactManager';
 import { GeminiProvider } from './ai/GeminiProvider';
 import { OpenAIProvider } from './ai/OpenAIProvider';
 import { AnthropicProvider } from './ai/AnthropicProvider';
+import { NvidiaProvider } from './ai/NvidiaProvider';
 import { resolveModel, MODEL_REGISTRY, getModelsForProvider } from './config/models';
 import { MessageSkill } from './skills/MessageSkill';
 import { GroupSkill } from './skills/GroupSkill';
@@ -59,7 +60,7 @@ let activeAIProvider: AIProvider | null = null;
 let activeMessageSkill: MessageSkill | null = null;
 
 function buildAIProviderFromConfig(): AIProvider {
-    const providerType = runtimeConfig.get('AI_PROVIDER', 'gemini');
+    const providerType = runtimeConfig.get('AI_PROVIDER', 'nvidia');
     const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
 
     switch (providerType) {
@@ -67,6 +68,8 @@ function buildAIProviderFromConfig(): AIProvider {
             return new OpenAIProvider(runtimeConfig.get('OPENAI_API_KEY'), modelId);
         case 'anthropic':
             return new AnthropicProvider(runtimeConfig.get('ANTHROPIC_API_KEY'), modelId);
+        case 'nvidia':
+            return new NvidiaProvider(runtimeConfig.get('NVIDIA_API_KEY'), modelId);
         default:
             return new GeminiProvider(runtimeConfig.get('GEMINI_API_KEY'), modelId);
     }
@@ -76,7 +79,7 @@ function refreshAIProvider() {
     activeAIProvider = buildAIProviderFromConfig();
 
     if (!bootLogged) {
-        const providerType = runtimeConfig.get('AI_PROVIDER', 'gemini');
+        const providerType = runtimeConfig.get('AI_PROVIDER', 'nvidia');
         const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
         console.log(`AI: ${providerType} → ${modelId}`);
         bootLogged = true;
@@ -97,8 +100,8 @@ app.get('/api/status', (_req, res) => {
         connection: connectionStatus,
         qr: currentQR,
         heartbeat: cognition.getHeartbeat(),
-        provider: runtimeConfig.get('AI_PROVIDER', 'gemini'),
-        model: runtimeConfig.get('AI_MODEL') || resolveModel(runtimeConfig.get('AI_PROVIDER', 'gemini')),
+        provider: runtimeConfig.get('AI_PROVIDER', 'nvidia'),
+        model: runtimeConfig.get('AI_MODEL') || resolveModel(runtimeConfig.get('AI_PROVIDER', 'nvidia')),
     });
 });
 
