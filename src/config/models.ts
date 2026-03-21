@@ -40,9 +40,6 @@ export const MODEL_REGISTRY: Record<string, ModelDefinition[]> = {
         { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', contextWindow: 200000 },
         { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', contextWindow: 200000 },
     ],
-    nvidia: [
-        { id: 'qwen/qwen3.5-122b-a10b', name: 'Qwen 3.5 122B', contextWindow: 16384, default: true },
-    ],
 };
 
 export function resolveModel(provider: string, modelId?: string): string {
