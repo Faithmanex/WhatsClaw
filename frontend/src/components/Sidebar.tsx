@@ -7,7 +7,7 @@ const Sidebar = () => {
   const { status } = useAppContext();
 
   const links = [
-    { to: '/', icon: Home, label: 'Overview' },
+    { to: '/', icon: Home, label: 'Overview', end: true },
     { to: '/chat', icon: MessageSquare, label: 'Chat' },
     { to: '/contacts', icon: Users, label: 'Contacts' },
     { to: '/broadcast', icon: Send, label: 'Broadcasts' },
@@ -35,10 +35,11 @@ const Sidebar = () => {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {links.map(({ to, icon: Icon, label }) => (
+        {links.map(({ to, icon: Icon, label, end }) => (
           <NavLink
             key={to}
             to={to}
+            end={end}
             className={({ isActive }) => clsx(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
               isActive ? "bg-accent/10 text-accent" : "text-muted hover:text-text hover:bg-border/50"
