@@ -23,9 +23,9 @@ const Sidebar = () => {
         </h1>
       </div>
 
-      <div className="p-4 border-b border-border">
+      <div className="p-4 border-b border-border" role="status" aria-live="polite">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <div className={clsx("w-2.5 h-2.5 rounded-full", {
+          <div aria-hidden="true" className={clsx("w-2.5 h-2.5 rounded-full", {
             "bg-green": status === 'connected',
             "bg-yellow": status === 'qr',
             "bg-red": status === 'disconnected'

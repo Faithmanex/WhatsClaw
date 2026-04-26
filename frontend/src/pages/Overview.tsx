@@ -30,8 +30,17 @@ const Overview = () => {
 
   const logout = async () => {
     if (!confirm('Disconnect WhatsApp?')) return;
-    await fetch('/api/logout', { method: 'POST' });
-    toast.success('Disconnected');
+    try {
+      const response = await fetch('/api/logout', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(data.error || 'Failed to disconnect');
+        return;
+      }
+      toast.success('Disconnected');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to disconnect');
+    }
   };
 
   return (

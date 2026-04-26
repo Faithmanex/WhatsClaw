@@ -94,6 +94,21 @@ function refreshAIProvider() {
 
 // ── API Routes ──
 
+const authenticateRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    const token = runtimeConfig.get('DASHBOARD_TOKEN');
+
+    // Only require auth if DASHBOARD_TOKEN is set in config/env
+    if (!token) return next();
+
+    if (!authHeader || authHeader !== `Bearer ${token}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+app.use('/api', authenticateRequest);
+
 // Status
 app.get('/api/status', (_req, res) => {
     res.json({

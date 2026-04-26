@@ -39,18 +39,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchInitialData = async () => {
     try {
-      const [statusRes, configRes, modelsRes, personasRes] = await Promise.all([
+      const [statusRes, configRes, modelsRes, personasRes] = await Promise.allSettled([
         fetch('/api/status').then(r => r.json()),
         fetch('/api/config').then(r => r.json()),
         fetch('/api/models').then(r => r.json()),
         fetch('/api/personas').then(r => r.json())
       ]);
 
-      setStatus(statusRes.connection);
-      setQrCode(statusRes.qr);
-      setConfig(configRes);
-      setModelsRegistry(modelsRes);
-      setPersonasRegistry(personasRes);
+      if (statusRes.status === 'fulfilled') {
+        setStatus(statusRes.value.connection);
+        setQrCode(statusRes.value.qr ?? null);
+      }
+      if (configRes.status === 'fulfilled') setConfig(configRes.value);
+      if (modelsRes.status === 'fulfilled') setModelsRegistry(modelsRes.value);
+      if (personasRes.status === 'fulfilled') setPersonasRegistry(personasRes.value);
     } catch (e) {
       console.error('Failed to fetch initial data', e);
     }
