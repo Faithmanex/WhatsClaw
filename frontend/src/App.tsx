@@ -12,9 +12,9 @@ function App() {
   return (
     <AppProvider>
       <Router>
-        <div className="flex h-screen overflow-hidden bg-bg text-text selection:bg-accent/30 selection:text-accent-foreground">
+        <div className="flex h-screen overflow-hidden bg-bg text-text selection:bg-accent/30 selection:text-accent-foreground relative">
           <Sidebar />
-          <main className="flex-1 ml-64 overflow-y-auto p-8">
+          <main className="flex-1 lg:ml-64 overflow-y-auto p-4 md:p-8 w-full">
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/chat" element={<Chat />} />

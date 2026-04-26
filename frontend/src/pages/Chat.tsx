@@ -128,9 +128,9 @@ const Chat = () => {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] border border-border rounded-xl overflow-hidden bg-surface">
+    <div className="flex h-[calc(100vh-6rem)] lg:h-[calc(100vh-4rem)] border border-border rounded-xl overflow-hidden bg-surface mt-12 lg:mt-0 relative">
       {/* Sidebar - Chat List */}
-      <div className="w-80 border-r border-border flex flex-col bg-surface">
+      <div className={clsx("w-full lg:w-80 border-r border-border flex flex-col bg-surface", activeChat ? "hidden lg:flex" : "flex")}>
         <div className="p-4 border-b border-border font-semibold text-lg">Chats</div>
         <div className="flex-1 overflow-y-auto">
           {loadingChats ? (
@@ -169,16 +169,21 @@ const Chat = () => {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-bg/50 relative">
+      <div className={clsx("flex-1 flex flex-col bg-bg/50 relative", !activeChat ? "hidden lg:flex" : "flex")}>
         {activeChat ? (
           <>
             <div className="p-4 bg-surface border-b border-border flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-border flex items-center justify-center shrink-0">
                 <User className="w-5 h-5 text-muted" />
               </div>
-              <div>
-                <h3 className="font-semibold">{activeChat.name}</h3>
-                <p className="text-xs text-muted">{activeChat.jid}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setActiveChat(null)} className="lg:hidden p-1 mr-2 text-muted hover:text-white transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <div>
+                  <h3 className="font-semibold">{activeChat.name}</h3>
+                  <p className="text-xs text-muted">{activeChat.jid}</p>
+                </div>
               </div>
             </div>
 

@@ -41,6 +41,8 @@ export const MODEL_REGISTRY: Record<string, ModelDefinition[]> = {
         { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', contextWindow: 200000 },
     ],
     nvidia: [
+        { id: 'deepseek-ai/deepseek-v4-pro', name: 'DeepSeek v4 Pro', contextWindow: 128000 },
+        { id: 'deepseek-ai/deepseek-v4-flash', name: 'DeepSeek v4 Flash', contextWindow: 128000 },
         { id: 'qwen/qwen3.5-122b-a10b', name: 'Qwen 3.5 122B', contextWindow: 32768, default: true },
         { id: 'meta/llama-3.1-70b-instruct', name: 'Llama 3.1 70B', contextWindow: 128000 },
         { id: 'meta/llama-3.1-405b-instruct', name: 'Llama 3.1 405B', contextWindow: 128000 }
