@@ -1,14 +1,17 @@
 {
   "name": "extension",
+  "private": true,
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc && npm run build --prefix frontend",
-    "install:frontend": "npm install --prefix frontend --include=dev",
+    "install:frontend": "npm install --prefix frontend",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "npm run install:frontend"
+    "ci:install": "npm install --prefix frontend --include=dev",
+    "postinstall": "npm run install:frontend",
+    "prebuild": "npm run ci:install"
   },
   "keywords": [],
   "author": "",
