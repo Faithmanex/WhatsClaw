@@ -535,8 +535,10 @@ async function connectToWhatsApp() {
                     return results;
                 }
 
-                const actions = extractJSON(response);
-                let cleanResponse = response;
+                // Filter out <think> tags completely so reasoning models don't dump nonsense into chat
+                const cleanTextWithoutThink = response.replace(/<think>[\s\S]*?<\/think>\n?/g, '').trim();
+                const actions = extractJSON(cleanTextWithoutThink);
+                let cleanResponse = cleanTextWithoutThink;
 
                 if (actions.length > 0) {
                     for (const actionStr of actions) {

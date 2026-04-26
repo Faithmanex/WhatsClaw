@@ -76,7 +76,7 @@ export class Medulla {
             
             if (timeSince > 1000 * 60 * 15 && timeSince < 1000 * 60 * 60 * 24 * 7) {
                 // 1% chance per heartbeat frame to proactively reach out
-                if (Math.random() < 0.3) {
+                if (Math.random() < 0.05) {
                     await this.initiateProactiveConversation(jid);
                     // Update the timestamp so we don't spam them immediately again
                     this.recordInteraction(jid);
@@ -119,7 +119,8 @@ export class Medulla {
 
             // Very basic send and history store (omitting full action parsing for background task for safety, 
             // but we could adapt `extractJSON` from index.ts if necessary)
-            let cleanResponse = response.replace(/\{.*?\}/gs, '').trim(); 
+            // Strip out <think> tags from reasoning models and action JSONs
+            let cleanResponse = response.replace(/<think>[\s\S]*?<\/think>\n?/g, '').replace(/\{.*?\}/gs, '').trim();
             
             if (cleanResponse) {
                const sentMsg = await this.msgSkill.sendText(jid, cleanResponse);
