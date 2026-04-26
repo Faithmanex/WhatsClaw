@@ -35,6 +35,14 @@ export class ContactManager {
         return this.contacts[cleanJid] || null;
     }
 
+    public deleteContact(jid: string) {
+        const cleanJid = sanitizeJid(jid);
+        if (this.contacts[cleanJid]) {
+            delete this.contacts[cleanJid];
+            this.saveContacts();
+        }
+    }
+
     public getAllContacts(): Record<string, string> {
         return { ...this.contacts };
     }

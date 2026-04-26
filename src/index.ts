@@ -94,6 +94,21 @@ function refreshAIProvider() {
 
 // ── API Routes ──
 
+const authenticateRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    const token = runtimeConfig.get('DASHBOARD_TOKEN');
+
+    // Only require auth if DASHBOARD_TOKEN is set in config/env
+    if (!token) return next();
+
+    if (!authHeader || authHeader !== `Bearer ${token}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+app.use('/api', authenticateRequest);
+
 // Status
 app.get('/api/status', (_req, res) => {
     res.json({
@@ -169,6 +184,94 @@ app.get('/api/skills', async (_req, res) => {
     res.json(skills);
 });
 
+// Contacts API
+app.get('/api/contacts', (_req, res) => {
+    res.json(contactManager.getAllContacts());
+});
+
+app.post('/api/contacts', (req, res) => {
+    const { jid, name } = req.body;
+    if (!jid || !name) return res.status(400).json({ error: 'jid and name required' });
+    contactManager.saveContact(jid, name);
+    res.json({ ok: true });
+});
+
+app.delete('/api/contacts/:jid', (req, res) => {
+    const jid = decodeURIComponent(req.params.jid);
+    try {
+        contactManager.deleteContact(jid);
+        res.json({ ok: true });
+    } catch(e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Broadcast/Campaigns API
+app.post('/api/broadcast', async (req, res) => {
+    if (!waSocket) return res.status(503).json({ error: 'Not connected' });
+    const { jids, message } = req.body;
+    if (!jids || !Array.isArray(jids) || !message) {
+        return res.status(400).json({ error: 'jids array and message required' });
+    }
+
+    let successCount = 0;
+    const errors: any[] = [];
+
+    for (const jid of jids) {
+        try {
+            const sanitizedJid = sanitizeJid(jid);
+            const sentMsg = await waSocket.sendMessage(sanitizedJid, { text: message });
+
+            if (sentMsg) {
+                const rawHistory = await historyManager.getHistory(sanitizedJid);
+                rawHistory.push(sentMsg);
+                await historyManager.saveHistory(sanitizedJid, rawHistory);
+                io.emit('chat_message', { jid: sanitizedJid, message: sentMsg });
+            }
+
+            successCount++;
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (err: any) {
+            errors.push({ jid, error: err.message });
+        }
+    }
+
+    res.json({ ok: true, successCount, total: jids.length, errors });
+});
+
+// Chat History API
+app.get('/api/chats', async (req, res) => {
+    try {
+        const dir = 'histories';
+        if (!fs.existsSync(dir)) return res.json([]);
+        const folders = fs.readdirSync(dir);
+        const chats = [];
+        for (const f of folders) {
+            const jid = f.replace(/_/g, '@');
+            const history = await historyManager.getHistory(jid);
+            const lastMessage = history.length > 0 ? history[history.length - 1] : null;
+            chats.push({
+                jid,
+                name: contactManager.getContactName(jid) || jid.split('@')[0],
+                lastMessage
+            });
+        }
+        res.json(chats);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/history/:jid', async (req, res) => {
+    try {
+        const jid = decodeURIComponent(req.params.jid);
+        const history = await historyManager.getHistory(jid);
+        res.json(history);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Send message to a contact
 app.post('/api/send', async (req, res) => {
     if (!waSocket) return res.status(503).json({ error: 'Not connected' });
@@ -176,7 +279,15 @@ app.post('/api/send', async (req, res) => {
     if (!number || !message) return res.status(400).json({ error: 'number and message required' });
     try {
         const jid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
-        await waSocket.sendMessage(jid, { text: message });
+        const sentMsg = await waSocket.sendMessage(jid, { text: message });
+
+        if (sentMsg) {
+            const rawHistory = await historyManager.getHistory(jid);
+            rawHistory.push(sentMsg);
+            await historyManager.saveHistory(jid, rawHistory);
+            io.emit('chat_message', { jid, message: sentMsg });
+        }
+
         res.json({ ok: true, jid });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -230,11 +341,15 @@ app.post('/api/logout', async (_req, res) => {
     res.json({ ok: true });
 });
 
-// Serve dashboard
-app.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'dashboard', 'index.html'));
+// Serve frontend
+app.use(express.static(path.join(__dirname, '..', 'frontend', 'dist')));
+
+app.use((_req, res, next) => {
+    if (_req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'API route not found' });
+    }
+    res.sendFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
 });
-app.use('/assets', express.static(path.join(__dirname, '..', 'dashboard', 'assets')));
 
 // ── WhatsApp Connection ──
 async function connectToWhatsApp() {
@@ -298,6 +413,7 @@ async function connectToWhatsApp() {
             // we save it to history so the AI has context of what "You" said, but we don't reply to it.
             if (msg.key.fromMe) {
                 await historyManager.appendIfMissing(remoteJid, msg);
+                io.emit('chat_message', { jid: remoteJid, message: msg });
                 continue;
             }
 
@@ -305,6 +421,7 @@ async function connectToWhatsApp() {
             // Save it to history to build context, but do NOT trigger an AI response.
             if (m.type === 'append') {
                 await historyManager.appendIfMissing(remoteJid, msg);
+                io.emit('chat_message', { jid: remoteJid, message: msg });
                 continue;
             }
 
@@ -349,6 +466,7 @@ async function connectToWhatsApp() {
                 const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
                 // Save incoming first so this message immediately becomes part of this chat's history.
                 const rawHistory = await historyManager.appendIfMissing(remoteJid, msg);
+                io.emit('chat_message', { jid: remoteJid, message: msg });
 
                 // Build context summary — inject as system prompt, NOT as conversation turns
                 const recentMessages = rawHistory.slice(-limit).map(h => {
@@ -436,6 +554,7 @@ async function connectToWhatsApp() {
                                     if (sentActionMsg && target === remoteJid) {
                                         rawHistory.push(sentActionMsg);
                                         await historyManager.saveHistory(remoteJid, rawHistory);
+                                        io.emit('chat_message', { jid: target, message: sentActionMsg });
                                     }
                                     break;
                                 }
@@ -519,6 +638,7 @@ async function connectToWhatsApp() {
                     if (sentCleanMsg) {
                         rawHistory.push(sentCleanMsg);
                         await historyManager.saveHistory(remoteJid, rawHistory);
+                        io.emit('chat_message', { jid: remoteJid, message: sentCleanMsg });
                     }
                 }
             } catch (error: any) {
