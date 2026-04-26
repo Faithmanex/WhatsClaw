@@ -27,6 +27,17 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const activeChatRef = useRef<any>(null);
+  const chatsRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -37,14 +48,15 @@ const Chat = () => {
         c.jid === jid ? { ...c, lastMessage: message } : c
       ));
 
+      const active = activeChatRef.current;
       // If new message is for active chat, append to messages
-      if (activeChat && activeChat.jid === jid) {
+      if (active && active.jid === jid) {
         setMessages(prev => {
           // Prevent duplicates
           if (prev.some(m => m.key?.id === message.key?.id)) return prev;
           return [...prev, message];
         });
-      } else if (!chats.some(c => c.jid === jid)) {
+      } else if (!chatsRef.current.some(c => c.jid === jid)) {
         // New chat we don't have yet
         fetchChats();
       }
@@ -54,7 +66,7 @@ const Chat = () => {
     return () => {
       socket.off('chat_message', onMessage);
     };
-  }, [socket, activeChat, chats]);
+  }, [socket]);
 
   const fetchChats = async () => {
     try {
@@ -87,16 +99,20 @@ const Chat = () => {
     if (!newMessage.trim() || !activeChat || status !== 'connected') return;
 
     const msg = newMessage;
-    setNewMessage('');
 
     try {
-      const res = await fetch('/api/send', {
+      const response = await fetch('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ number: activeChat.jid, message: msg })
-      }).then(r => r.json());
+      });
+      const data = await response.json().catch(() => ({}));
 
-      if (!res.ok) toast.error(res.error || 'Failed to send message');
+      if (!response.ok) {
+        toast.error(data.error || 'Failed to send message');
+        return;
+      }
+      setNewMessage('');
     } catch (e: any) {
       toast.error(e.message);
     }

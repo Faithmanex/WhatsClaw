@@ -37,19 +37,32 @@ const Settings = () => {
     }
   };
 
-  const handleAddInstruction = async () => {
-    const jid = prompt("Chat JID (e.g. 2348123456789@s.whatsapp.net):");
-    if (!jid) return;
-    const text = prompt("Instructions for this chat:");
-    if (!text) return;
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [newRuleJid, setNewRuleJid] = useState('');
+  const [newRuleText, setNewRuleText] = useState('');
+
+  const handleAddInstruction = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newRuleJid || !newRuleText) {
+      toast.error('JID and instructions are required');
+      return;
+    }
     try {
-      await fetch('/api/instructions', {
+      const res = await fetch('/api/instructions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jid, text })
+        body: JSON.stringify({ jid: newRuleJid, text: newRuleText })
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to add rule');
+        return;
+      }
       fetchInstructions();
       toast.success('Rule added');
+      setShowAddRule(false);
+      setNewRuleJid('');
+      setNewRuleText('');
     } catch (e) {
       toast.error('Failed to add rule');
     }
@@ -57,7 +70,12 @@ const Settings = () => {
 
   const handleDeleteInstruction = async (jid: string) => {
     try {
-      await fetch(`/api/instructions/${encodeURIComponent(jid)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/instructions/${encodeURIComponent(jid)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to remove rule');
+        return;
+      }
       fetchInstructions();
       toast.success('Rule removed');
     } catch (e) {
@@ -71,7 +89,7 @@ const Settings = () => {
 
   const handleSaveAI = async () => {
     try {
-      await fetch('/api/config', {
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -84,6 +102,11 @@ const Settings = () => {
           } : {})
         })
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to save configuration');
+        return;
+      }
       toast.success('AI Configuration Saved');
       refreshConfig();
     } catch (e: any) {
@@ -93,7 +116,7 @@ const Settings = () => {
 
   const handleSavePolicy = async () => {
     try {
-      await fetch('/api/config', {
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -105,6 +128,11 @@ const Settings = () => {
           WHATSAPP_MENTION_TRIGGER: localConfig.WHATSAPP_MENTION_TRIGGER
         })
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to save policy');
+        return;
+      }
       toast.success('Policy Saved');
       refreshConfig();
     } catch (e: any) {
@@ -114,7 +142,7 @@ const Settings = () => {
 
   const handleSavePersona = async () => {
     try {
-      await fetch('/api/config', {
+      const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -122,6 +150,11 @@ const Settings = () => {
           PERSONA_PROFILE: localConfig.PERSONA_PROFILE
         })
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to save persona');
+        return;
+      }
       toast.success('Persona Saved');
       refreshConfig();
     } catch (e: any) {
@@ -297,8 +330,12 @@ const Settings = () => {
                 <span className="text-sm font-medium">History Limit (Messages context)</span>
                 <input
                   type="number"
-                  value={localConfig.HISTORY_LIMIT || '30'}
-                  onChange={e => handleChange('HISTORY_LIMIT', e.target.value)}
+                  min={1}
+                  value={localConfig.HISTORY_LIMIT ?? 30}
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    handleChange('HISTORY_LIMIT', isNaN(val) ? 30 : val);
+                  }}
                   className="w-20 bg-bg border border-border rounded-lg px-3 py-1 text-sm text-center focus:outline-none focus:border-accent"
                 />
               </div>
@@ -327,10 +364,40 @@ const Settings = () => {
         <div className="bg-surface border border-border rounded-xl p-6 space-y-4 md:col-span-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Chat-Specific Instructions</h3>
-            <button onClick={handleAddInstruction} className="px-3 py-1.5 bg-accent/10 text-accent hover:bg-accent/20 rounded-lg text-xs font-medium transition-colors">
-              + Add Rule
+            <button onClick={() => setShowAddRule(!showAddRule)} className="px-3 py-1.5 bg-accent/10 text-accent hover:bg-accent/20 rounded-lg text-xs font-medium transition-colors">
+              {showAddRule ? 'Cancel' : '+ Add Rule'}
             </button>
           </div>
+
+          {showAddRule && (
+            <form onSubmit={handleAddInstruction} className="space-y-3 p-4 bg-bg/50 rounded-lg border border-border">
+              <div>
+                <label className="block text-xs font-medium text-muted uppercase mb-1">Chat JID</label>
+                <input
+                  type="text"
+                  value={newRuleJid}
+                  onChange={e => setNewRuleJid(e.target.value)}
+                  placeholder="2348123456789@s.whatsapp.net"
+                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted uppercase mb-1">Instructions</label>
+                <textarea
+                  value={newRuleText}
+                  onChange={e => setNewRuleText(e.target.value)}
+                  placeholder="E.g., Only reply in Spanish..."
+                  rows={3}
+                  className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent resize-none"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button type="submit" className="px-4 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors">
+                  Save Rule
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="space-y-2">
             {instructions.length === 0 ? (

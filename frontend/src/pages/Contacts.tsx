@@ -31,11 +31,16 @@ const Contacts = () => {
     if (!newJid || !newName) return toast.error('Both fields are required');
 
     try {
-      await fetch('/api/contacts', {
+      const response = await fetch('/api/contacts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jid: newJid, name: newName })
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(data.error || 'Failed to add contact');
+        return;
+      }
       toast.success('Contact added');
       setNewJid('');
       setNewName('');
@@ -50,7 +55,7 @@ const Contacts = () => {
     e.preventDefault();
     if (!groupName) return toast.error('Group name required');
 
-    const participants = groupParticipants ? groupParticipants.split(',').map(n => n.trim()).filter(Boolean) : [];
+    const participants = (groupParticipants || '').split(',').map(n => n.trim()).filter(Boolean);
 
     try {
       const res = await fetch('/api/groups', {
@@ -75,7 +80,12 @@ const Contacts = () => {
   const handleDelete = async (jid: string) => {
     if (!confirm('Are you sure you want to remove this contact?')) return;
     try {
-      await fetch(`/api/contacts/${encodeURIComponent(jid)}`, { method: 'DELETE' });
+      const response = await fetch(`/api/contacts/${encodeURIComponent(jid)}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(data.error || 'Failed to remove contact');
+        return;
+      }
       toast.success('Contact removed');
       fetchContacts();
     } catch (e) {
