@@ -6,6 +6,7 @@ import { CognitionEngine } from '../CognitionEngine';
 import fs from 'fs';
 import path from 'path';
 import { runtimeConfig } from '../../config/runtimeConfig';
+import { classifyAIError } from '../../utils/aiError';
 
 /**
  * Medulla Oblongata: Autonomic Nervous System.
@@ -131,7 +132,8 @@ export class Medulla {
             }
 
         } catch (e: any) {
-            console.error(`🧠 [Medulla] Failed proactive message to ${jid}`, e.message);
+            const info = classifyAIError(e);
+            console.error(`🧠 [Medulla] Failed proactive message to ${jid} (${info.category}${info.httpStatus ? ` HTTP ${info.httpStatus}` : ''}): ${info.detail || e?.message}`);
         }
     }
 }

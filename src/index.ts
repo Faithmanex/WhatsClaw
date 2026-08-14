@@ -18,6 +18,7 @@ import { OpenAIProvider } from './ai/OpenAIProvider';
 import { AnthropicProvider } from './ai/AnthropicProvider';
 import { ProviderDefinition } from './config/providers';
 import { providerRegistry } from './config/providerRegistry';
+import { classifyAIError, friendlyAIErrorMessage } from './utils/aiError';
 import { MessageSkill } from './skills/MessageSkill';
 import { GroupSkill } from './skills/GroupSkill';
 import { FileSkill } from './skills/FileSkill';
@@ -58,21 +59,6 @@ let bootLogged = false;
 let medulla: Medulla | null = null;
 let activeAIProvider: AIProvider | null = null;
 let activeMessageSkill: MessageSkill | null = null;
-
-// Session self-healing: if the socket closes repeatedly without ever reaching 'open',
-// the stored session is stale (common on ephemeral deploys like Railway) — reset it for a fresh QR.
-let closeStreak = 0;
-const SESSION_RESET_AFTER_CLOSES = 3;
-let undecryptedWarnAt = 0;
-let noProviderWarnAt = 0;
-
-function resetSessionState(reason: string) {
-    console.warn(`🗑  ${reason} — clearing session, scan the new QR to re-link.`);
-    const authDir = 'auth_info_baileys';
-    if (fs.existsSync(authDir)) {
-        fs.rmSync(authDir, { recursive: true, force: true });
-    }
-}
 
 function buildProvider(provider: ProviderDefinition, modelId: string, apiKey: string, timeoutMs?: number): AIProvider {
     switch (provider.protocol) {
@@ -526,19 +512,15 @@ async function connectToWhatsApp() {
             io.emit('status', 'disconnected');
             const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
             if (statusCode === DisconnectReason.loggedOut) {
-                closeStreak = 0;
-                resetSessionState('Logged out');
+                const authDir = 'auth_info_baileys';
+                if (fs.existsSync(authDir)) {
+                    fs.rmSync(authDir, { recursive: true, force: true });
+                }
                 setTimeout(() => connectToWhatsApp(), 1000);
-                return;
+            } else {
+                setTimeout(() => connectToWhatsApp(), 5000);
             }
-            closeStreak++;
-            if (closeStreak >= SESSION_RESET_AFTER_CLOSES) {
-                closeStreak = 0;
-                resetSessionState(`Connection closed ${SESSION_RESET_AFTER_CLOSES} times in a row (stale session?)`);
-            }
-            setTimeout(() => connectToWhatsApp(), 5000);
         } else if (connection === 'open') {
-            closeStreak = 0;
             currentQR = null;
             connectionStatus = 'connected';
             io.emit('status', 'connected');
@@ -551,13 +533,7 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (m) => {
         if (m.type !== 'notify' && m.type !== 'append') return;
         for (const msg of m.messages) {
-            if (!msg.message) {
-                if (Date.now() - undecryptedWarnAt > 60000) {
-                    undecryptedWarnAt = Date.now();
-                    console.warn(`⚠️  Could not decrypt incoming message from ${msg.key?.remoteJid ?? 'unknown'} (${m.type}). If this persists, the session is stale — re-link via the dashboard (Disconnect) or it resets automatically after ${SESSION_RESET_AFTER_CLOSES} failed reconnects.`);
-                }
-                continue;
-            }
+            if (!msg.message) continue;
 
             const remoteJid = sanitizeJid(msg.key.remoteJid!);
 
@@ -632,13 +608,7 @@ async function connectToWhatsApp() {
                 
                 if (medulla) medulla.recordInteraction(remoteJid);
 
-                if (!activeMessageSkill || !activeAIProvider) {
-                    if (Date.now() - noProviderWarnAt > 60000) {
-                        noProviderWarnAt = Date.now();
-                        console.warn(`⚠️  Skipping reply to ${remoteJid}: no AI provider is active (check Settings → AI Configuration).`);
-                    }
-                    continue;
-                }
+                if (!activeMessageSkill || !activeAIProvider) continue;
                 await activeMessageSkill.sendTyping(remoteJid);
 
                 const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
@@ -793,6 +763,9 @@ async function connectToWhatsApp() {
                 }
 
                 // Only send text if there's remaining non-JSON content
+                if (!cleanResponse && actions.length === 0) {
+                    cleanResponse = '⚠️ I drew a blank there — try asking me again.';
+                }
                 if (cleanResponse) {
                     const sentCleanMsg = await activeMessageSkill.sendText(remoteJid, cleanResponse, msg);
                     if (sentCleanMsg) {
@@ -802,15 +775,17 @@ async function connectToWhatsApp() {
                     }
                 }
             } catch (error: any) {
-                const status = error?.status || error?.statusCode || error?.response?.status;
-                const errMsg = error?.message || '';
-                if (status === 429 || errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('quota')) {
-                    console.error(`⚠️  RATE LIMITED by ${runtimeConfig.get('AI_PROVIDER', 'gemini')}. Slow down or upgrade your plan.`);
-                    if (activeMessageSkill) {
-                        await activeMessageSkill.sendText(remoteJid, '⏳ I\'m being rate limited right now. Try again in a moment.', msg);
+                const providerId = runtimeConfig.get('AI_PROVIDER', '');
+                const providerName = providerRegistry.getProvider(providerId)?.name || providerId || 'AI provider';
+                const info = classifyAIError(error);
+                const errText = friendlyAIErrorMessage(info, providerName);
+                console.error(`[AI:${providerName}] ${info.category}${info.httpStatus ? ` (HTTP ${info.httpStatus})` : ''}: ${info.detail}`);
+                if (activeMessageSkill) {
+                    try {
+                        await activeMessageSkill.sendText(remoteJid, errText, msg);
+                    } catch (sendErr: any) {
+                        console.error('Failed to send error notification:', sendErr?.message);
                     }
-                } else {
-                    console.error('Message error:', error);
                 }
             }
         }
