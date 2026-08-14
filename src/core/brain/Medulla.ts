@@ -3,6 +3,8 @@ import { AIProvider } from '../../types/ai';
 import { MessageSkill } from '../../skills/MessageSkill';
 import { HistoryManager } from '../../utils/HistoryManager';
 import { CognitionEngine } from '../CognitionEngine';
+import { AIRateLimiter } from '../../utils/AIRateLimiter';
+import { isNonChatJid, getMessageText } from '../../utils/messageFilter';
 import fs from 'fs';
 import path from 'path';
 import { runtimeConfig } from '../../config/runtimeConfig';
@@ -21,7 +23,8 @@ export class Medulla {
         private aiProvider: AIProvider,
         private cognition: CognitionEngine,
         private historyManager: HistoryManager,
-        private msgSkill: MessageSkill
+        private msgSkill: MessageSkill,
+        private rateLimiter: AIRateLimiter
     ) {}
 
     public startHeartbeat(intervalMs: number = 60000) {
@@ -66,21 +69,31 @@ export class Medulla {
         // Evaluate condition for proactive messaging
         const metadata = this.loadActivityMetadata();
         const now = Date.now();
+        const chance = parseFloat(runtimeConfig.get('MEDULLA_PROACTIVE_CHANCE', '0.01')) || 0;
 
         // Very basic proactive heuristic:
         // Identify anyone we spoke to within the last week, but haven't spoken to in the last 15 minutes.
-        // There is a 1% chance every minute to decide to message them proactively.
+        // There is a configurable chance every minute (default 1%) to decide to message them proactively.
         // (In a real system, the trigger logic should be much more robust or entirely LLM-driven via cron).
-        
+
         for (const [jid, lastTime] of Object.entries(metadata)) {
+            // Never proactively reach out to statuses, newsletters, or other non-chat jids.
+            if (isNonChatJid(jid)) continue;
+            // Respect the global AI rate limiter — never start a proactive call while guards are active.
+            if (!this.rateLimiter.canCall(jid)) continue;
+
             const timeSince = now - lastTime;
-            
+
             if (timeSince > 1000 * 60 * 15 && timeSince < 1000 * 60 * 60 * 24 * 7) {
-                // 1% chance per heartbeat frame to proactively reach out
-                if (Math.random() < 0.05) {
-                    await this.initiateProactiveConversation(jid);
-                    // Update the timestamp so we don't spam them immediately again
-                    this.recordInteraction(jid);
+                if (Math.random() < chance) {
+                    this.rateLimiter.beginCall(jid);
+                    try {
+                        await this.initiateProactiveConversation(jid);
+                        // Update the timestamp so we don't spam them immediately again
+                        this.recordInteraction(jid);
+                    } finally {
+                        this.rateLimiter.endCall(jid);
+                    }
                     break; // Only start one proactive conversation per pulse to avoid rate limits
                 }
             }
@@ -96,7 +109,7 @@ export class Medulla {
             
             const recentMessages = history.slice(-limit).map(h => {
                 const who = h.key.fromMe ? 'You' : 'User';
-                const text = h.message?.conversation || h.message?.extendedTextMessage?.text || '';
+                const text = getMessageText(h);
                 return `${who}: ${text}`;
             }).filter(line => line.endsWith(': ') === false).join('\n');
 

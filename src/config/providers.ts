@@ -109,7 +109,8 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
         description: 'OpenCode Zen — curated frontier models, pay-as-you-go. Sign up at opencode.ai/auth',
         builtin: true,
         models: [
-            { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 128000, default: true },
+            { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (Free)', contextWindow: 128000, default: true },
+            { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 128000 },
             { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', contextWindow: 128000 },
             { id: 'glm-5.2', name: 'GLM 5.2', contextWindow: 200000 },
             { id: 'glm-5.1', name: 'GLM 5.1', contextWindow: 200000 },
@@ -120,7 +121,6 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
             { id: 'minimax-m3', name: 'MiniMax M3', contextWindow: 200000 },
             { id: 'minimax-m2.7', name: 'MiniMax M2.7', contextWindow: 200000 },
             { id: 'big-pickle', name: 'Big Pickle (Free)', contextWindow: 200000 },
-            { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (Free)', contextWindow: 128000 },
             { id: 'nemotron-3.5-lightning-free', name: 'Nemotron 3.5 Lightning (Free)', contextWindow: 128000 },
             { id: 'nemotron-3-ultra-free', name: 'Nemotron 3 Ultra (Free)', contextWindow: 128000 },
             { id: 'mimo-v2.5-free', name: 'MiMo-V2.5 (Free)', contextWindow: 128000 },

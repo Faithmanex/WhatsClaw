@@ -12,8 +12,8 @@ const RUNTIME_CONFIG_PATH = path.resolve('runtime-config.json');
 const ENV_PATH = path.resolve('.env');
 
 const DEFAULT_CONFIG: Record<string, string> = {
-    AI_PROVIDER: 'nvidia',
-    AI_MODEL: 'qwen/qwen3.5-122b-a10b',
+    AI_PROVIDER: 'opencode',
+    AI_MODEL: 'deepseek-v4-flash-free',
     GEMINI_API_KEY: '',
     OPENAI_API_KEY: '',
     ANTHROPIC_API_KEY: '',
@@ -27,6 +27,9 @@ const DEFAULT_CONFIG: Record<string, string> = {
     WHATSAPP_GROUP_POLICY: 'disabled',
     WHATSAPP_READ_RECEIPTS: 'true',
     WHATSAPP_MENTION_TRIGGER: '',
+    AI_REPLY_COOLDOWN_MS: '10000',
+    AI_MAX_CALLS_PER_MINUTE: '12',
+    MEDULLA_PROACTIVE_CHANCE: '0.01',
 };
 
 function loadEnvValues(): Record<string, string> {

@@ -27,6 +27,8 @@ import { AccountSkill } from './skills/AccountSkill';
 import { AIProvider, Message } from './types/ai';
 import { Medulla } from './core/brain/Medulla';
 import { sanitizeJid } from './utils/JidUtils';
+import { isNonChatJid, isJunkMessage, getMessageText } from './utils/messageFilter';
+import { AIRateLimiter } from './utils/AIRateLimiter';
 import { runtimeConfig } from './config/runtimeConfig';
 import { PERSONA_PROFILES } from './config/personas';
 
@@ -42,6 +44,11 @@ const historyManager = new HistoryManager();
 const instructionsManager = new InstructionsManager();
 const skillManager = new SkillManager();
 const contactManager = new ContactManager();
+const rateLimiter = new AIRateLimiter(
+    parseInt(runtimeConfig.get('AI_REPLY_COOLDOWN_MS', '10000')) || 10000,
+    parseInt(runtimeConfig.get('AI_MAX_CALLS_PER_MINUTE', '12')) || 12
+);
+const lastErrorSentAt = new Map<string, number>();
 
 // ── Express + Socket.IO ──
 const app = express();
@@ -114,7 +121,7 @@ function refreshAIProvider() {
 
     if (waSocket && activeMessageSkill && activeAIProvider) {
         if (medulla) medulla.stopHeartbeat();
-        medulla = new Medulla(waSocket, activeAIProvider, cognition, historyManager, activeMessageSkill);
+        medulla = new Medulla(waSocket, activeAIProvider, cognition, historyManager, activeMessageSkill, rateLimiter);
         medulla.startHeartbeat(60000);
     }
 }
@@ -537,6 +544,12 @@ async function connectToWhatsApp() {
 
             const remoteJid = sanitizeJid(msg.key.remoteJid!);
 
+            // Never process statuses/newsletters or protocol/junk messages (read receipts,
+            // edits, revokes, key-distribution, empty bubbles). This stops the bot from
+            // replying to status@broadcast updates and from polluting history — both of
+            // which previously triggered useless AI calls and burned the rate limit.
+            if (isNonChatJid(remoteJid) || isJunkMessage(msg)) continue;
+
             // 1. If message is sent by the user themselves (or the AI on their behalf),
             // we save it to history so the AI has context of what "You" said, but we don't reply to it.
             if (msg.key.fromMe) {
@@ -582,7 +595,7 @@ async function connectToWhatsApp() {
                 await sock.readMessages([msg.key]);
             }
 
-            const body = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+            const body = getMessageText(msg);
             if (!body) continue;
 
             // Mention trigger filter
@@ -596,43 +609,55 @@ async function connectToWhatsApp() {
                 const rawHistory = await historyManager.appendIfMissing(remoteJid, msg);
                 io.emit('chat_message', { jid: remoteJid, message: msg });
 
-                // Build context summary — inject as system prompt, NOT as conversation turns
-                const recentMessages = rawHistory.slice(-limit).map(h => {
-                    const sender = sanitizeJid(h.key.participant || h.key.remoteJid || remoteJid);
-                    const name = contactManager.getContactName(sender) || sender.split('@')[0];
-                    const who = h.key.fromMe ? 'You' : name;
-                    const text = h.message?.conversation || h.message?.extendedTextMessage?.text || '';
-                    const ts = h.messageTimestamp ? new Date(Number(h.messageTimestamp) * 1000).toISOString() : '';
-                    return text ? `[${ts || 'unknown-time'}] ${who}: ${text}` : '';
-                }).filter(Boolean).join('\n');
-                
                 if (medulla) medulla.recordInteraction(remoteJid);
 
                 if (!activeMessageSkill || !activeAIProvider) continue;
-                await activeMessageSkill.sendTyping(remoteJid);
 
-                const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
-                const personaProfile = runtimeConfig.get('PERSONA_PROFILE', 'street-smart');
-                let systemPrompt = cognition.getSystemPrompt(remoteJid, body, personaName, personaProfile);
-                const globalSkills = await skillManager.getAllSkills();
-                systemPrompt += `\n\n${globalSkills}`;
-                
-                const senderId = msg.key.participant || remoteJid;
-                const contactName = contactManager.getContactName(senderId);
-                if (contactName) {
-                    systemPrompt += `\n\n[USER IDENTITY]\nYou are currently talking to: ${contactName}. Use their name naturally.`;
+                // Rate limiting: no back-to-back replies to the same chat, no parallel AI calls
+                // per chat, and a global cap per minute — protects the provider's rate limit.
+                if (!rateLimiter.canCall(remoteJid)) {
+                    console.log(`[AI] Skipped reply to ${remoteJid}: rate limit guard active`);
+                    continue;
                 }
+                rateLimiter.beginCall(remoteJid);
 
-                systemPrompt += `\n\n[CHAT CONTEXT]\n- Current chat id: ${remoteJid}\n- Chat type: ${isGroup ? 'group' : 'direct'}\n- Keep continuity with this chat's own history only.\n- Avoid generic replies; reference recent details, names, and ongoing threads from this specific chat when relevant.`;
+                try {
+                    await activeMessageSkill.sendTyping(remoteJid);
 
-                const customInstruction = await instructionsManager.getInstruction(remoteJid);
-                if (customInstruction) {
-                    systemPrompt += `\n\n[SPECIAL INSTRUCTIONS FOR THIS CHAT]:\n${customInstruction}`;
-                }
+                    const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
+                    const personaProfile = runtimeConfig.get('PERSONA_PROFILE', 'street-smart');
+                    let systemPrompt = cognition.getSystemPrompt(remoteJid, body, personaName, personaProfile);
+                    const globalSkills = await skillManager.getAllSkills();
+                    systemPrompt += `\n\n${globalSkills}`;
 
-                if (recentMessages) {
-                    systemPrompt += `\n\n[CONVERSATION HISTORY — for context only, do NOT repeat or re-answer these]:\n${recentMessages}`;
-                }
+                    const senderId = msg.key.participant || remoteJid;
+                    const contactName = contactManager.getContactName(senderId);
+                    if (contactName) {
+                        systemPrompt += `\n\n[USER IDENTITY]\nYou are currently talking to: ${contactName}. Use their name naturally.`;
+                    }
+
+                    systemPrompt += `\n\n[CHAT CONTEXT]\n- Current chat id: ${remoteJid}\n- Chat type: ${isGroup ? 'group' : 'direct'}\n- Keep continuity with this chat's own history only.\n- Only reference details that actually appear in the [CONVERSATION HISTORY] below.\n- If the history is empty or lacks the relevant details, do NOT invent any — say you don't remember.`;
+
+                    const customInstruction = await instructionsManager.getInstruction(remoteJid);
+                    if (customInstruction) {
+                        systemPrompt += `\n\n[SPECIAL INSTRUCTIONS FOR THIS CHAT]:\n${customInstruction}`;
+                    }
+
+                    // Build context summary — inject as system prompt, NOT as conversation turns
+                    const recentMessages = rawHistory.slice(-limit).map(h => {
+                        const sender = sanitizeJid(h.key.participant || h.key.remoteJid || remoteJid);
+                        const name = contactManager.getContactName(sender) || sender.split('@')[0];
+                        const who = h.key.fromMe ? 'You' : name;
+                        const text = getMessageText(h);
+                        const ts = h.messageTimestamp ? new Date(Number(h.messageTimestamp) * 1000).toISOString() : '';
+                        return text ? `[${ts || 'unknown-time'}] ${who}: ${text}` : '';
+                    }).filter(Boolean).join('\n');
+
+                    if (recentMessages) {
+                        systemPrompt += `\n\n[CONVERSATION HISTORY — the ONLY record of past messages in this chat. Base every claim about the past strictly on this list; never invent messages, replies, or events that are not listed here]:\n${recentMessages}`;
+                    } else {
+                        systemPrompt += `\n\n[CONVERSATION HISTORY — none available yet. You have no memory of past messages in this chat. If asked about earlier conversations, say you don't remember rather than making something up.]`;
+                    }
 
                 const response = await activeAIProvider.generateResponse(
                     [{ role: 'system', content: systemPrompt }],
@@ -667,6 +692,7 @@ async function connectToWhatsApp() {
                 const cleanTextWithoutThink = response.replace(/<think>[\s\S]*?<\/think>\n?/g, '').trim();
                 const actions = extractJSON(cleanTextWithoutThink);
                 let cleanResponse = cleanTextWithoutThink;
+                const sentActionTexts = new Set<string>();
 
                 if (actions.length > 0) {
                     for (const actionStr of actions) {
@@ -680,7 +706,9 @@ async function connectToWhatsApp() {
                                     break;
                                 case 'sendText': {
                                     const target = action.params.jid || remoteJid;
-                                    const sentActionMsg = await activeMessageSkill.sendText(target, action.params.text);
+                                    const text = String(action.params.text || '');
+                                    if (text) sentActionTexts.add(text);
+                                    const sentActionMsg = await activeMessageSkill.sendText(target, text);
                                     if (sentActionMsg && target === remoteJid) {
                                         rawHistory.push(sentActionMsg);
                                         await historyManager.saveHistory(remoteJid, rawHistory);
@@ -762,11 +790,11 @@ async function connectToWhatsApp() {
                     }
                 }
 
-                // Only send text if there's remaining non-JSON content
+                // Only send text if there's remaining non-JSON content that wasn't already sent as a sendText action
                 if (!cleanResponse && actions.length === 0) {
                     cleanResponse = '⚠️ I drew a blank there — try asking me again.';
                 }
-                if (cleanResponse) {
+                if (cleanResponse && !sentActionTexts.has(cleanResponse)) {
                     const sentCleanMsg = await activeMessageSkill.sendText(remoteJid, cleanResponse, msg);
                     if (sentCleanMsg) {
                         rawHistory.push(sentCleanMsg);
@@ -774,17 +802,27 @@ async function connectToWhatsApp() {
                         io.emit('chat_message', { jid: remoteJid, message: sentCleanMsg });
                     }
                 }
+                } finally {
+                    rateLimiter.endCall(remoteJid);
+                }
             } catch (error: any) {
                 const providerId = runtimeConfig.get('AI_PROVIDER', '');
                 const providerName = providerRegistry.getProvider(providerId)?.name || providerId || 'AI provider';
                 const info = classifyAIError(error);
-                const errText = friendlyAIErrorMessage(info, providerName);
                 console.error(`[AI:${providerName}] ${info.category}${info.httpStatus ? ` (HTTP ${info.httpStatus})` : ''}: ${info.detail}`);
-                if (activeMessageSkill) {
-                    try {
-                        await activeMessageSkill.sendText(remoteJid, errText, msg);
-                    } catch (sendErr: any) {
-                        console.error('Failed to send error notification:', sendErr?.message);
+                // Rate limit errors are transient — stay silent and let the cooldown absorb them.
+                // Other errors are surfaced at most once per 5 minutes per chat to avoid spam.
+                if (info.category !== 'rate_limit' && activeMessageSkill) {
+                    const now = Date.now();
+                    const lastSent = lastErrorSentAt.get(remoteJid) ?? 0;
+                    if (now - lastSent > 5 * 60 * 1000) {
+                        lastErrorSentAt.set(remoteJid, now);
+                        const errText = friendlyAIErrorMessage(info, providerName);
+                        try {
+                            await activeMessageSkill.sendText(remoteJid, errText, msg);
+                        } catch (sendErr: any) {
+                            console.error('Failed to send error notification:', sendErr?.message);
+                        }
                     }
                 }
             }
