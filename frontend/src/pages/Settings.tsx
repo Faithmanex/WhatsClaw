@@ -3,12 +3,15 @@ import { useAppContext } from '../context/AppContext';
 import toast from 'react-hot-toast';
 
 const Settings = () => {
-  const { config, modelsRegistry, personasRegistry, refreshConfig } = useAppContext();
+  const { config, modelsRegistry, providersRegistry, personasRegistry, refreshConfig } = useAppContext();
 
   // Local state for forms to avoid mutating context directly before save
   const [localConfig, setLocalConfig] = useState<any>({});
   const [instructions, setInstructions] = useState<any[]>([]);
   const [skills, setSkills] = useState<any[]>([]);
+
+  const currentProvider = providersRegistry.find((p: any) => p.id === (localConfig.AI_PROVIDER || config.AI_PROVIDER));
+  const currentModels = (currentProvider?.models || modelsRegistry[localConfig.AI_PROVIDER]) || [];
 
   useEffect(() => {
     setLocalConfig(config);
@@ -87,20 +90,45 @@ const Settings = () => {
     setLocalConfig({ ...localConfig, [key]: value });
   };
 
+  const handleProviderChange = (value: string) => {
+    const provider = providersRegistry.find((p: any) => p.id === value);
+    const defaultModel = (provider?.models || []).find((m: any) => m.default) || (provider?.models || [])[0];
+    setLocalConfig({ ...localConfig, AI_PROVIDER: value, AI_MODEL: defaultModel?.id || '' });
+  };
+
+  const handleTestProvider = async () => {
+    const provider = currentProvider;
+    if (!provider) return toast.error('Select a provider first');
+    try {
+      const payload: any = { id: provider.id };
+      if (localConfig.API_KEY) payload.apiKey = localConfig.API_KEY;
+      const res = await fetch('/api/providers/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) toast.success(`✓ ${provider.name} OK — ${data.latencyMs}ms (${data.model})`);
+      else toast.error(`✗ ${provider.name}: ${data.error || 'failed'}${data.status ? ` (HTTP ${data.status})` : ''}`);
+    } catch (e: any) {
+      toast.error('Test failed: ' + (e.message || e));
+    }
+  };
+
   const handleSaveAI = async () => {
     try {
+      const provider = providersRegistry.find((p: any) => p.id === localConfig.AI_PROVIDER);
+      const payload: any = {
+        AI_PROVIDER: localConfig.AI_PROVIDER,
+        AI_MODEL: localConfig.AI_MODEL,
+      };
+      if (localConfig.API_KEY && provider) {
+        payload[provider.apiKeyEnvVar] = localConfig.API_KEY;
+      }
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          AI_PROVIDER: localConfig.AI_PROVIDER,
-          AI_MODEL: localConfig.AI_MODEL,
-          ...(localConfig.API_KEY ? {
-            [localConfig.AI_PROVIDER === 'gemini' ? 'GEMINI_API_KEY' :
-             localConfig.AI_PROVIDER === 'openai' ? 'OPENAI_API_KEY' :
-             localConfig.AI_PROVIDER === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'NVIDIA_API_KEY']: localConfig.API_KEY
-          } : {})
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -108,6 +136,7 @@ const Settings = () => {
         return;
       }
       toast.success('AI Configuration Saved');
+      setLocalConfig((prev: any) => ({ ...prev, API_KEY: '' }));
       refreshConfig();
     } catch (e: any) {
       toast.error('Failed to save configuration');
@@ -164,7 +193,6 @@ const Settings = () => {
 
   if (!localConfig.AI_PROVIDER) return <div className="p-4 text-muted">Loading settings...</div>;
 
-  const currentModels = modelsRegistry[localConfig.AI_PROVIDER] || [];
   const selectedPersona = personasRegistry.find((p: any) => p.id === localConfig.PERSONA_PROFILE);
 
   return (
@@ -181,13 +209,13 @@ const Settings = () => {
               <label className="block text-xs font-medium text-muted uppercase mb-1">Provider</label>
               <select
                 value={localConfig.AI_PROVIDER}
-                onChange={e => handleChange('AI_PROVIDER', e.target.value)}
+                onChange={e => handleProviderChange(e.target.value)}
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
               >
-                <option value="gemini">Gemini</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="nvidia">Nvidia</option>
+                {providersRegistry.length === 0 && <option value={localConfig.AI_PROVIDER}>{localConfig.AI_PROVIDER}</option>}
+                {providersRegistry.map((p: any) => (
+                  <option key={p.id} value={p.id}>{p.name}{p.builtin ? '' : ' (custom)'}</option>
+                ))}
               </select>
             </div>
 
@@ -199,7 +227,7 @@ const Settings = () => {
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
               >
                 {currentModels.map((m: any) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
+                  <option key={m.id} value={m.id}>{m.name}{m.default ? ' (default)' : ''}</option>
                 ))}
               </select>
             </div>
@@ -208,16 +236,22 @@ const Settings = () => {
               <label className="block text-xs font-medium text-muted uppercase mb-1">API Key</label>
               <input
                 type="password"
-                placeholder="Leave blank to keep existing key"
+                placeholder={currentProvider?.keyPlaceholder || 'Leave blank to keep existing key'}
                 onChange={e => handleChange('API_KEY', e.target.value)}
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
               />
+              <p className="mt-1 text-[11px] text-muted">{currentProvider?.description}</p>
             </div>
           </div>
 
-          <button onClick={handleSaveAI} className="w-full py-2 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors">
-            Save AI Config
-          </button>
+          <div className="flex gap-2">
+            <button onClick={handleSaveAI} className="flex-1 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors">
+              Save AI Config
+            </button>
+            <button onClick={handleTestProvider} className="px-4 py-2 bg-bg border border-border hover:border-accent rounded-lg text-sm font-medium transition-colors">
+              Test
+            </button>
+          </div>
         </div>
 
         {/* Persona Config */}

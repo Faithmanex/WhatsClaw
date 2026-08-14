@@ -7,6 +7,7 @@ interface AppContextType {
   status: 'connected' | 'qr' | 'disconnected';
   qrCode: string | null;
   modelsRegistry: any;
+  providersRegistry: any;
   personasRegistry: any;
   config: any;
   refreshConfig: () => void;
@@ -19,6 +20,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [status, setStatus] = useState<'connected' | 'qr' | 'disconnected'>('disconnected');
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [modelsRegistry, setModelsRegistry] = useState({});
+  const [providersRegistry, setProvidersRegistry] = useState<any[]>([]);
   const [personasRegistry, setPersonasRegistry] = useState([]);
   const [config, setConfig] = useState({});
 
@@ -39,10 +41,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchInitialData = async () => {
     try {
-      const [statusRes, configRes, modelsRes, personasRes] = await Promise.allSettled([
+      const [statusRes, configRes, modelsRes, providersRes, personasRes] = await Promise.allSettled([
         fetch('/api/status').then(r => r.json()),
         fetch('/api/config').then(r => r.json()),
         fetch('/api/models').then(r => r.json()),
+        fetch('/api/providers').then(r => r.json()),
         fetch('/api/personas').then(r => r.json())
       ]);
 
@@ -52,6 +55,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
       if (configRes.status === 'fulfilled') setConfig(configRes.value);
       if (modelsRes.status === 'fulfilled') setModelsRegistry(modelsRes.value);
+      if (providersRes.status === 'fulfilled' && Array.isArray(providersRes.value)) setProvidersRegistry(providersRes.value);
       if (personasRes.status === 'fulfilled') setPersonasRegistry(personasRes.value);
     } catch (e) {
       console.error('Failed to fetch initial data', e);
@@ -63,12 +67,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const refreshConfig = async () => {
-    const configRes = await fetch('/api/config').then(r => r.json());
-    setConfig(configRes);
+    const [configRes, providersRes] = await Promise.allSettled([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/providers').then(r => r.json())
+    ]);
+    if (configRes.status === 'fulfilled') setConfig(configRes.value);
+    if (providersRes.status === 'fulfilled' && Array.isArray(providersRes.value)) setProvidersRegistry(providersRes.value);
   };
 
   return (
-    <AppContext.Provider value={{ socket, status, qrCode, modelsRegistry, personasRegistry, config, refreshConfig }}>
+    <AppContext.Provider value={{ socket, status, qrCode, modelsRegistry, providersRegistry, personasRegistry, config, refreshConfig }}>
       {children}
     </AppContext.Provider>
   );
