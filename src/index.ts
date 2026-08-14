@@ -59,6 +59,21 @@ let medulla: Medulla | null = null;
 let activeAIProvider: AIProvider | null = null;
 let activeMessageSkill: MessageSkill | null = null;
 
+// Session self-healing: if the socket closes repeatedly without ever reaching 'open',
+// the stored session is stale (common on ephemeral deploys like Railway) — reset it for a fresh QR.
+let closeStreak = 0;
+const SESSION_RESET_AFTER_CLOSES = 3;
+let undecryptedWarnAt = 0;
+let noProviderWarnAt = 0;
+
+function resetSessionState(reason: string) {
+    console.warn(`🗑  ${reason} — clearing session, scan the new QR to re-link.`);
+    const authDir = 'auth_info_baileys';
+    if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+    }
+}
+
 function buildProvider(provider: ProviderDefinition, modelId: string, apiKey: string, timeoutMs?: number): AIProvider {
     switch (provider.protocol) {
         case 'anthropic':
@@ -511,15 +526,19 @@ async function connectToWhatsApp() {
             io.emit('status', 'disconnected');
             const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
             if (statusCode === DisconnectReason.loggedOut) {
-                const authDir = 'auth_info_baileys';
-                if (fs.existsSync(authDir)) {
-                    fs.rmSync(authDir, { recursive: true, force: true });
-                }
+                closeStreak = 0;
+                resetSessionState('Logged out');
                 setTimeout(() => connectToWhatsApp(), 1000);
-            } else {
-                setTimeout(() => connectToWhatsApp(), 5000);
+                return;
             }
+            closeStreak++;
+            if (closeStreak >= SESSION_RESET_AFTER_CLOSES) {
+                closeStreak = 0;
+                resetSessionState(`Connection closed ${SESSION_RESET_AFTER_CLOSES} times in a row (stale session?)`);
+            }
+            setTimeout(() => connectToWhatsApp(), 5000);
         } else if (connection === 'open') {
+            closeStreak = 0;
             currentQR = null;
             connectionStatus = 'connected';
             io.emit('status', 'connected');
@@ -532,7 +551,13 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (m) => {
         if (m.type !== 'notify' && m.type !== 'append') return;
         for (const msg of m.messages) {
-            if (!msg.message) continue;
+            if (!msg.message) {
+                if (Date.now() - undecryptedWarnAt > 60000) {
+                    undecryptedWarnAt = Date.now();
+                    console.warn(`⚠️  Could not decrypt incoming message from ${msg.key?.remoteJid ?? 'unknown'} (${m.type}). If this persists, the session is stale — re-link via the dashboard (Disconnect) or it resets automatically after ${SESSION_RESET_AFTER_CLOSES} failed reconnects.`);
+                }
+                continue;
+            }
 
             const remoteJid = sanitizeJid(msg.key.remoteJid!);
 
@@ -607,7 +632,13 @@ async function connectToWhatsApp() {
                 
                 if (medulla) medulla.recordInteraction(remoteJid);
 
-                if (!activeMessageSkill || !activeAIProvider) continue;
+                if (!activeMessageSkill || !activeAIProvider) {
+                    if (Date.now() - noProviderWarnAt > 60000) {
+                        noProviderWarnAt = Date.now();
+                        console.warn(`⚠️  Skipping reply to ${remoteJid}: no AI provider is active (check Settings → AI Configuration).`);
+                    }
+                    continue;
+                }
                 await activeMessageSkill.sendTyping(remoteJid);
 
                 const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
