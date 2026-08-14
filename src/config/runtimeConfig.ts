@@ -96,6 +96,12 @@ class RuntimeConfigStore {
         const normalized = Object.fromEntries(
             Object.entries(partial)
                 .filter(([, value]) => value !== undefined)
+                .filter(([, value]) => {
+                    const v = String(value);
+                    // Never let a masked placeholder or the legacy "your_key_here"
+                    // placeholder overwrite a real stored secret.
+                    return !v.includes('••') && v !== 'your_key_here';
+                })
                 .map(([key, value]) => [key, String(value)])
         );
 

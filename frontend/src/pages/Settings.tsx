@@ -12,6 +12,7 @@ const Settings = () => {
 
   const currentProvider = providersRegistry.find((p: any) => p.id === (localConfig.AI_PROVIDER || config.AI_PROVIDER));
   const currentModels = (currentProvider?.models || modelsRegistry[localConfig.AI_PROVIDER]) || [];
+  const keyConfigured = !!(currentProvider && localConfig[currentProvider.apiKeyEnvVar]);
 
   useEffect(() => {
     setLocalConfig(config);
@@ -122,8 +123,12 @@ const Settings = () => {
         AI_PROVIDER: localConfig.AI_PROVIDER,
         AI_MODEL: localConfig.AI_MODEL,
       };
-      if (localConfig.API_KEY && provider) {
-        payload[provider.apiKeyEnvVar] = localConfig.API_KEY;
+      const typedKey = typeof localConfig.API_KEY === 'string' ? localConfig.API_KEY : '';
+      if (typedKey && !typedKey.includes('•') && provider) {
+        payload[provider.apiKeyEnvVar] = typedKey;
+      } else if (typedKey && !typedKey.includes('•') && !provider) {
+        toast.error('Provider registry not loaded yet — wait a moment and try again.');
+        return;
       }
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -236,11 +241,16 @@ const Settings = () => {
               <label className="block text-xs font-medium text-muted uppercase mb-1">API Key</label>
               <input
                 type="password"
-                placeholder={currentProvider?.keyPlaceholder || 'Leave blank to keep existing key'}
+                value={localConfig.API_KEY ?? ''}
+                placeholder={keyConfigured ? '•••••••• (saved) — leave blank to keep' : currentProvider?.keyPlaceholder || 'Enter API key'}
                 onChange={e => handleChange('API_KEY', e.target.value)}
                 className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
               />
-              <p className="mt-1 text-[11px] text-muted">{currentProvider?.description}</p>
+              <p className="mt-1 text-[11px] text-muted">
+                {keyConfigured
+                  ? <span className="text-emerald-500">Key saved ✓ — type a new one to replace it</span>
+                  : currentProvider?.description}
+              </p>
             </div>
           </div>
 
