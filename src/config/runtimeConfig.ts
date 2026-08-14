@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import {
+    getOrCreateMasterKey,
+    encryptConfigSecrets,
+    decryptConfigSecrets,
+    isEncrypted,
+} from './secrets';
 
 const RUNTIME_CONFIG_PATH = path.resolve('runtime-config.json');
 const ENV_PATH = path.resolve('.env');
@@ -45,12 +51,36 @@ function loadRuntimeFileValues(): Record<string, string> {
 
 class RuntimeConfigStore {
     private config: Record<string, string>;
+    private masterKey: Buffer;
 
     constructor() {
+        this.masterKey = getOrCreateMasterKey();
+        const runtimeValues = loadRuntimeFileValues();
+
+        // Migrate legacy plaintext secrets in runtime-config.json to encrypted form
+        const migrated = { ...runtimeValues };
+        let needsWrite = false;
+        for (const key of Object.keys(migrated)) {
+            const value = migrated[key];
+            if (!value || value === 'your_key_here' || isEncrypted(value)) continue;
+            const isSecret = /(_KEY|_TOKEN|_SECRET)$/.test(key);
+            if (isSecret) needsWrite = true;
+        }
+        if (needsWrite) {
+            fs.writeFileSync(
+                RUNTIME_CONFIG_PATH,
+                `${JSON.stringify(encryptConfigSecrets(migrated, this.masterKey), null, 2)}\n`,
+                'utf-8'
+            );
+        }
+
+        // In-memory config keeps decrypted values so get() returns usable secrets
+        const decrypted = decryptConfigSecrets(migrated, this.masterKey);
+
         this.config = {
             ...DEFAULT_CONFIG,
             ...loadEnvValues(),
-            ...loadRuntimeFileValues(),
+            ...decrypted,
         };
     }
 
@@ -70,7 +100,11 @@ class RuntimeConfigStore {
         );
 
         this.config = { ...this.config, ...normalized };
-        fs.writeFileSync(RUNTIME_CONFIG_PATH, `${JSON.stringify(this.config, null, 2)}\n`, 'utf-8');
+        fs.writeFileSync(
+            RUNTIME_CONFIG_PATH,
+            `${JSON.stringify(encryptConfigSecrets(this.config, this.masterKey), null, 2)}\n`,
+            'utf-8'
+        );
         return this.getAll();
     }
 }
