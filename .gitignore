@@ -11,3 +11,5 @@ ai_history.json
 runtime-config.json
 providers.json
 config-master.key
+
+tsconfig.tsbuildinfo
