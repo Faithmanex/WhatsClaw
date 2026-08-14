@@ -16,8 +16,8 @@ import { ContactManager } from './utils/ContactManager';
 import { GeminiProvider } from './ai/GeminiProvider';
 import { OpenAIProvider } from './ai/OpenAIProvider';
 import { AnthropicProvider } from './ai/AnthropicProvider';
-import { NvidiaProvider } from './ai/NvidiaProvider';
-import { resolveModel, MODEL_REGISTRY, getModelsForProvider } from './config/models';
+import { ProviderDefinition } from './config/providers';
+import { providerRegistry } from './config/providerRegistry';
 import { MessageSkill } from './skills/MessageSkill';
 import { GroupSkill } from './skills/GroupSkill';
 import { FileSkill } from './skills/FileSkill';
@@ -59,29 +59,55 @@ let medulla: Medulla | null = null;
 let activeAIProvider: AIProvider | null = null;
 let activeMessageSkill: MessageSkill | null = null;
 
-function buildAIProviderFromConfig(): AIProvider {
-    const providerType = runtimeConfig.get('AI_PROVIDER', 'nvidia');
-    const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
-
-    switch (providerType) {
-        case 'openai':
-            return new OpenAIProvider(runtimeConfig.get('OPENAI_API_KEY'), modelId);
+function buildProvider(provider: ProviderDefinition, modelId: string, apiKey: string, timeoutMs?: number): AIProvider {
+    switch (provider.protocol) {
         case 'anthropic':
-            return new AnthropicProvider(runtimeConfig.get('ANTHROPIC_API_KEY'), modelId);
-        case 'nvidia':
-            return new NvidiaProvider(runtimeConfig.get('NVIDIA_API_KEY'), modelId);
+            return new AnthropicProvider({ apiKey, modelId, baseUrl: provider.baseUrl, timeoutMs });
+        case 'gemini':
+            return new GeminiProvider({ apiKey, modelId, baseUrl: provider.baseUrl });
+        case 'openai':
         default:
-            return new GeminiProvider(runtimeConfig.get('GEMINI_API_KEY'), modelId);
+            return new OpenAIProvider({
+                apiKey,
+                modelId,
+                baseUrl: provider.baseUrl,
+                timeoutMs,
+                extraBody: provider.extraBody,
+            });
     }
 }
 
+function buildAIProviderFromConfig(): AIProvider {
+    const providerId = runtimeConfig.get('AI_PROVIDER', 'nvidia');
+    const provider = providerRegistry.getProvider(providerId);
+    if (!provider) {
+        throw new Error(
+            `Unknown AI provider "${providerId}". Add it under Manage Providers in the dashboard, ` +
+            `or set AI_PROVIDER to one of: ${providerRegistry.getAll().map((p) => p.id).join(', ')}`
+        );
+    }
+    const modelId = providerRegistry.resolveModel(providerId, runtimeConfig.get('AI_MODEL'));
+    const apiKey = runtimeConfig.get(provider.apiKeyEnvVar);
+    if (!apiKey || apiKey === 'your_key_here') {
+        throw new Error(`No API key configured for provider "${provider.name}" (${provider.apiKeyEnvVar})`);
+    }
+    return buildProvider(provider, modelId, apiKey);
+}
+
 function refreshAIProvider() {
-    activeAIProvider = buildAIProviderFromConfig();
+    try {
+        activeAIProvider = buildAIProviderFromConfig();
+    } catch (err: any) {
+        activeAIProvider = null;
+        console.error(`AI provider setup failed: ${err?.message || err}`);
+    }
 
     if (!bootLogged) {
-        const providerType = runtimeConfig.get('AI_PROVIDER', 'nvidia');
-        const modelId = resolveModel(providerType, runtimeConfig.get('AI_MODEL'));
-        console.log(`AI: ${providerType} → ${modelId}`);
+        const providerId = runtimeConfig.get('AI_PROVIDER', 'nvidia');
+        try {
+            const modelId = providerRegistry.resolveModel(providerId, runtimeConfig.get('AI_MODEL'));
+            console.log(`AI: ${providerId} → ${modelId}`);
+        } catch (_) {}
         bootLogged = true;
     }
 
@@ -111,33 +137,134 @@ app.use('/api', authenticateRequest);
 
 // Status
 app.get('/api/status', (_req, res) => {
+    const providerId = runtimeConfig.get('AI_PROVIDER', 'nvidia');
+    let model = runtimeConfig.get('AI_MODEL') || '';
+    try {
+        model = model || providerRegistry.resolveModel(providerId);
+    } catch (_) {}
     res.json({
         connection: connectionStatus,
         qr: currentQR,
         heartbeat: cognition.getHeartbeat(),
-        provider: runtimeConfig.get('AI_PROVIDER', 'nvidia'),
-        model: runtimeConfig.get('AI_MODEL') || resolveModel(runtimeConfig.get('AI_PROVIDER', 'nvidia')),
+        provider: providerId,
+        model,
     });
 });
 
 // Config CRUD
+function maskSecrets(config: Record<string, string>): Record<string, string> {
+    const out = { ...config };
+    for (const key of Object.keys(out)) {
+        if (/(_KEY|_TOKEN|_SECRET)$/.test(key) && out[key] && out[key] !== 'your_key_here') {
+            out[key] = '••••••••';
+        }
+    }
+    return out;
+}
+
 app.get('/api/config', (_req, res) => {
-    res.json(runtimeConfig.getAll());
+    res.json(maskSecrets(runtimeConfig.getAll()));
 });
 
 app.post('/api/config', (req, res) => {
-    const updated = runtimeConfig.update(req.body || {});
+    const body = req.body || {};
+    if (body.AI_PROVIDER && !providerRegistry.getProvider(String(body.AI_PROVIDER))) {
+        return res.status(400).json({ error: `Unknown AI provider: ${body.AI_PROVIDER}` });
+    }
+    const updated = runtimeConfig.update(body);
     refreshAIProvider();
-    res.json({ ok: true, config: updated });
+    res.json({ ok: true, config: maskSecrets(updated) });
+});
+
+// Providers CRUD
+app.get('/api/providers', (_req, res) => {
+    res.json(providerRegistry.getAll());
+});
+
+app.post('/api/providers', (req, res) => {
+    try {
+        const provider = providerRegistry.addCustomProvider(req.body || {});
+        if (req.body.apiKey) {
+            runtimeConfig.update({ [provider.apiKeyEnvVar]: String(req.body.apiKey) });
+        }
+        refreshAIProvider();
+        res.json({ ok: true, provider });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.put('/api/providers/:id', (req, res) => {
+    try {
+        const id = decodeURIComponent(req.params.id);
+        const provider = providerRegistry.updateCustomProvider(id, req.body || {});
+        if (req.body.apiKey) {
+            runtimeConfig.update({ [provider.apiKeyEnvVar]: String(req.body.apiKey) });
+        }
+        refreshAIProvider();
+        res.json({ ok: true, provider });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.delete('/api/providers/:id', (req, res) => {
+    try {
+        const id = decodeURIComponent(req.params.id);
+        providerRegistry.removeCustomProvider(id);
+        if (runtimeConfig.get('AI_PROVIDER') === id) {
+            runtimeConfig.update({ AI_PROVIDER: 'nvidia', AI_MODEL: '' });
+        }
+        refreshAIProvider();
+        res.json({ ok: true });
+    } catch (err: any) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// Test a provider connection (uses supplied key or the configured one)
+app.post('/api/providers/test', async (req, res) => {
+    const { id, apiKey, model } = req.body || {};
+    const provider = providerRegistry.getProvider(String(id || ''));
+    if (!provider) return res.status(400).json({ error: `Unknown provider: ${id}` });
+
+    let resolvedModel = '';
+    try {
+        resolvedModel = String(model || '') || providerRegistry.resolveModel(provider.id, runtimeConfig.get('AI_MODEL'));
+    } catch (err: any) {
+        return res.status(400).json({ error: err.message });
+    }
+
+    const key = String(apiKey || '') || runtimeConfig.get(provider.apiKeyEnvVar);
+    if (!key || key === 'your_key_here') {
+        return res.status(400).json({ error: `No API key configured for ${provider.name} (${provider.apiKeyEnvVar})` });
+    }
+
+    try {
+        const started = Date.now();
+        const testProvider = buildProvider(provider, resolvedModel, key, 15000);
+        await testProvider.generateResponse(
+            [{ role: 'system', content: 'You are a connectivity test.' }],
+            'Reply with exactly: OK'
+        );
+        res.json({ ok: true, provider: provider.id, model: resolvedModel, latencyMs: Date.now() - started });
+    } catch (err: any) {
+        const status = err?.status || err?.statusCode || err?.response?.status;
+        res.status(400).json({ ok: false, provider: provider.id, model: resolvedModel, error: err?.message || String(err), status });
+    }
 });
 
 // Models registry
 app.get('/api/models', (_req, res) => {
-    res.json(MODEL_REGISTRY);
+    const registry: Record<string, unknown> = {};
+    for (const provider of providerRegistry.getAll()) {
+        registry[provider.id] = provider.models;
+    }
+    res.json(registry);
 });
 
 app.get('/api/models/:provider', (req, res) => {
-    res.json(getModelsForProvider(req.params.provider));
+    res.json(providerRegistry.getModelsForProvider(req.params.provider));
 });
 
 app.get('/api/personas', (_req, res) => {

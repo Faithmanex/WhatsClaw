@@ -1,12 +1,23 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AIProvider, Message } from "../types/ai";
 
+export interface AnthropicProviderOptions {
+    apiKey: string;
+    modelId: string;
+    baseUrl?: string;
+    timeoutMs?: number;
+}
+
 export class AnthropicProvider implements AIProvider {
     private anthropic: Anthropic;
     private model: string;
 
-    constructor(apiKey: string, modelId: string) {
-        this.anthropic = new Anthropic({ apiKey });
+    constructor({ apiKey, modelId, baseUrl, timeoutMs }: AnthropicProviderOptions) {
+        this.anthropic = new Anthropic({
+            apiKey,
+            baseURL: baseUrl,
+            timeout: timeoutMs || undefined,
+        });
         this.model = modelId;
     }
 

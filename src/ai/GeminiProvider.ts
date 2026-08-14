@@ -1,13 +1,22 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AIProvider, Message } from "../types/ai";
 
+export interface GeminiProviderOptions {
+    apiKey: string;
+    modelId: string;
+    baseUrl?: string;
+}
+
 export class GeminiProvider implements AIProvider {
     private genAI: GoogleGenerativeAI;
     private model: any;
 
-    constructor(apiKey: string, modelId: string) {
+    constructor({ apiKey, modelId, baseUrl }: GeminiProviderOptions) {
         this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: modelId });
+        this.model = this.genAI.getGenerativeModel(
+            { model: modelId },
+            baseUrl ? { baseUrl } : undefined
+        );
     }
 
     async generateResponse(history: Message[], prompt: string): Promise<string> {

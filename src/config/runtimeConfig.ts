@@ -12,6 +12,7 @@ const DEFAULT_CONFIG: Record<string, string> = {
     OPENAI_API_KEY: '',
     ANTHROPIC_API_KEY: '',
     NVIDIA_API_KEY: '',
+    OPENCODE_API_KEY: '',
     PERSONA_NAME: 'Antigravity',
     PERSONA_PROFILE: 'street-smart',
     HISTORY_LIMIT: '30',

@@ -261,6 +261,120 @@
         gap: 8px;
         margin-top: 16px;
       }
+      .hint {
+        font-size: 10px;
+        color: #555;
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        background: var(--bg);
+        white-space: nowrap;
+      }
+      .tag-green {
+        color: var(--green);
+        border-color: rgba(34, 197, 94, 0.3);
+        background: rgba(34, 197, 94, 0.08);
+      }
+      .tag-accent {
+        color: var(--accent);
+        border-color: rgba(59, 130, 246, 0.3);
+        background: rgba(59, 130, 246, 0.08);
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 40px 16px;
+        z-index: 100;
+        overflow-y: auto;
+      }
+      .modal {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 100%;
+        max-width: 640px;
+        padding: 20px;
+      }
+      .modal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .modal-head h2 {
+        font-size: 14px;
+        color: var(--text);
+        text-transform: none;
+        letter-spacing: 0;
+        margin: 0;
+      }
+      .provider-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .provider-row:last-child {
+        border: none;
+      }
+      .provider-row .meta {
+        flex: 1;
+        min-width: 0;
+      }
+      .provider-row .pname {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .provider-row .psub {
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 4px;
+        align-items: center;
+      }
+      textarea {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        margin-bottom: 12px;
+        outline: none;
+        resize: vertical;
+        min-height: 90px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.6;
+      }
+      textarea:focus {
+        border-color: var(--accent);
+      }
+      .pm-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
       .instruction-item {
         display: flex;
         justify-content: space-between;
@@ -403,18 +517,19 @@
         <div class="card">
           <h2>AI Configuration</h2>
           <label>Provider</label>
-          <select id="cfgProvider" onchange="onProviderChange()">
-            <option value="gemini">Gemini</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="nvidia">Nvidia</option>
-          </select>
-          <label>Model</label>
+          <select id="cfgProvider" onchange="onProviderChange()"></select>
+          <label>Model <span class="hint" id="cfgDefaultModelHint"></span></label>
           <select id="cfgModel"></select>
           <label>API Key</label>
-          <input type="password" id="cfgApiKey" placeholder="sk-..." />
+          <input type="password" id="cfgApiKey" placeholder="API key..." />
+          <label>Base URL <span class="hint" id="cfgBaseUrlHint"></span></label>
+          <input type="text" id="cfgBaseUrl" readonly placeholder="Provider default endpoint" />
           <div class="actions">
             <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+            <button class="btn" onclick="testProvider()">Test Connection</button>
+          </div>
+          <div class="actions">
+            <button class="btn" onclick="openProviderManager()">Manage Providers</button>
           </div>
         </div>
 
@@ -547,6 +662,66 @@
       <footer>Antigravity Autonomous Platform</footer>
     </div>
 
+    <!-- Provider Manager Modal -->
+    <div
+      class="modal-overlay"
+      id="providerModal"
+      style="display: none"
+      onclick="if(event.target===this)closeProviderManager()"
+    >
+      <div class="modal">
+        <div class="modal-head">
+          <h2 id="pmTitle">Manage Providers</h2>
+          <button class="btn btn-sm" onclick="closeProviderManager()">×</button>
+        </div>
+
+        <!-- List view -->
+        <div id="pmList"></div>
+        <div class="actions">
+          <button class="btn btn-primary" onclick="openProviderEditor()">
+            + Add Custom Provider
+          </button>
+        </div>
+
+        <!-- Editor view -->
+        <div id="pmEditor" style="display: none">
+          <label>Provider Name</label>
+          <input type="text" id="pmName" placeholder="My Enterprise LLM" />
+          <label>Provider ID <span class="hint">(lowercase, used in config)</span></label>
+          <input
+            type="text"
+            id="pmId"
+            class="mono"
+            placeholder="my-llm"
+            oninput="slugifyId()"
+          />
+          <label>Protocol</label>
+          <select id="pmProtocol">
+            <option value="openai">OpenAI-compatible (chat completions)</option>
+            <option value="anthropic">Anthropic (messages API)</option>
+            <option value="gemini">Gemini (Google API)</option>
+          </select>
+          <label>Base URL <span class="hint">(leave empty for provider default)</span></label>
+          <input type="text" id="pmBaseUrl" class="mono" placeholder="https://api.example.com/v1" />
+          <label>API Key <span class="hint">(optional here, can be set in AI Config)</span></label>
+          <input type="password" id="pmApiKey" placeholder="..." />
+          <label>Key Placeholder <span class="hint">(shown in AI Config)</span></label>
+          <input type="text" id="pmKeyPlaceholder" placeholder="sk-..." />
+          <label
+            >Models
+            <span class="hint"
+              >one per line: id|Display Name|context, prefix id with * for default</span
+            ></label
+          >
+          <textarea id="pmModels" placeholder="*my-model|My Model|128000&#10;cheap-model|Cheap Model|64000"></textarea>
+          <div class="pm-actions">
+            <button class="btn btn-primary" onclick="saveProvider()">Save Provider</button>
+            <button class="btn" onclick="cancelProviderEditor()">Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -555,26 +730,56 @@
       const API = "";
       const socket = io();
 
-      let modelsRegistry = {};
+      let providers = [];
       let personaProfiles = [];
       let currentConfig = {};
+      let pmEditingId = null;
 
       // ── Init ──
       async function init() {
-        const [statusRes, configRes, modelsRes, personasRes] = await Promise.all([
+        const [statusRes, configRes, providersRes, personasRes] = await Promise.all([
           fetch(`${API}/api/status`).then((r) => r.json()),
           fetch(`${API}/api/config`).then((r) => r.json()),
-          fetch(`${API}/api/models`).then((r) => r.json()),
+          fetch(`${API}/api/providers`).then((r) => r.json()),
           fetch(`${API}/api/personas`).then((r) => r.json()),
         ]);
 
-        modelsRegistry = modelsRes;
+        providers = Array.isArray(providersRes) ? providersRes : [];
         personaProfiles = personasRes;
         currentConfig = configRes;
+        renderProviders(configRes.AI_PROVIDER);
         applyConfig(configRes);
         updateStatus(statusRes.connection, statusRes.qr);
         loadInstructions();
         loadSkills();
+      }
+
+      function renderProviders(selectedId) {
+        const sel = document.getElementById("cfgProvider");
+        sel.innerHTML = providers
+          .map(
+            (p) =>
+              `<option value="${p.id}"${
+                p.id === selectedId ? " selected" : ""
+              }>${p.name}${p.builtin ? "" : " (custom)"}</option>`
+          )
+          .join("");
+        if (selectedId && !providers.some((p) => p.id === selectedId)) {
+          const opt = document.createElement("option");
+          opt.value = selectedId;
+          opt.textContent = `${selectedId} (unknown)`;
+          sel.appendChild(opt);
+          sel.value = selectedId;
+        }
+        onProviderChange();
+      }
+
+      function getProvider(id) {
+        return providers.find((p) => p.id === id);
+      }
+
+      function getDefaultModel(p) {
+        return (p.models || []).find((m) => m.default) || (p.models || [])[0];
       }
 
       function applyConfig(cfg) {
@@ -598,16 +803,12 @@
           cfg.WHATSAPP_MENTION_TRIGGER || "";
 
         // Set API key field based on provider
-        const provider = cfg.AI_PROVIDER || "nvidia";
-        const keyMap = {
-          gemini: "GEMINI_API_KEY",
-          openai: "OPENAI_API_KEY",
-          anthropic: "ANTHROPIC_API_KEY",
-          nvidia: "NVIDIA_API_KEY",
-        };
-        const keyVal = cfg[keyMap[provider]] || "";
-        document.getElementById("cfgApiKey").value =
-          keyVal && keyVal !== "your_key_here" ? "••••••••" : "";
+        const provider = getProvider(cfg.AI_PROVIDER || "nvidia");
+        if (provider) {
+          const keyVal = cfg[provider.apiKeyEnvVar] || "";
+          document.getElementById("cfgApiKey").value =
+            keyVal && keyVal !== "your_key_here" ? "••••••••" : "";
+        }
       }
 
       function renderPersonaOptions(selectedProfile) {
@@ -640,28 +841,50 @@
       }
 
       function onProviderChange(selectedModel) {
-        const provider = document.getElementById("cfgProvider").value;
-        const models = modelsRegistry[provider] || [];
+        const provider = getProvider(document.getElementById("cfgProvider").value);
         const sel = document.getElementById("cfgModel");
+        const hint = document.getElementById("cfgDefaultModelHint");
+
+        if (!provider) {
+          sel.innerHTML = "";
+          hint.textContent = "";
+          document.getElementById("cfgApiKey").placeholder = "API key...";
+          document.getElementById("cfgBaseUrl").value = "";
+          document.getElementById("cfgBaseUrlHint").textContent = "";
+          return;
+        }
+
+        const models = provider.models || [];
+        const defaultModel = getDefaultModel(provider);
         sel.innerHTML = models
           .map(
             (m) =>
               `<option value="${m.id}"${m.default ? " selected" : ""}>${
                 m.name
+              } (${m.contextWindow.toLocaleString()})${
+                m.default ? " — default" : ""
               }</option>`
           )
           .join("");
         if (selectedModel) sel.value = selectedModel;
+        if (selectedModel && !models.some((m) => m.id === selectedModel)) {
+          const opt = document.createElement("option");
+          opt.value = selectedModel;
+          opt.textContent = `${selectedModel} (custom)`;
+          sel.appendChild(opt);
+          sel.value = selectedModel;
+        }
 
-        // Update key placeholder
-        const placeholders = {
-          gemini: "AIza...",
-          openai: "sk-...",
-          anthropic: "sk-ant-...",
-          nvidia: "nvapi-...",
-        };
+        hint.textContent = defaultModel
+          ? `default: ${defaultModel.name}`
+          : "";
         document.getElementById("cfgApiKey").placeholder =
-          placeholders[provider] || "";
+          provider.keyPlaceholder || "API key...";
+        document.getElementById("cfgBaseUrl").value =
+          provider.baseUrl || "";
+        document.getElementById("cfgBaseUrlHint").textContent = provider.baseUrl
+          ? ""
+          : "uses the protocol's default endpoint";
       }
 
       let renderedQR = null;
@@ -724,28 +947,256 @@
 
       // ── Save handlers ──
       async function saveConfig() {
-        const provider = document.getElementById("cfgProvider").value;
+        const providerId = document.getElementById("cfgProvider").value;
         const model = document.getElementById("cfgModel").value;
         const apiKey = document.getElementById("cfgApiKey").value;
+        const provider = getProvider(providerId);
 
-        const payload = { AI_PROVIDER: provider, AI_MODEL: model };
+        const payload = { AI_PROVIDER: providerId, AI_MODEL: model };
         // Only save key if user typed a real value
-        if (apiKey && !apiKey.includes("•")) {
-          const keyMap = {
-            gemini: "GEMINI_API_KEY",
-            openai: "OPENAI_API_KEY",
-            anthropic: "ANTHROPIC_API_KEY",
-            nvidia: "NVIDIA_API_KEY",
-          };
-          payload[keyMap[provider]] = apiKey;
+        if (provider && apiKey && !apiKey.includes("•")) {
+          payload[provider.apiKeyEnvVar] = apiKey;
         }
 
-        await fetch(`${API}/api/config`, {
+        const res = await fetch(`${API}/api/config`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        const data = await res.json();
+        if (!res.ok) {
+          toast("Failed: " + (data.error || "Unknown"));
+          return;
+        }
         toast("AI configuration saved — active immediately.");
+      }
+
+      async function runProviderTest(payload) {
+        toast("Testing connection...");
+        try {
+          const res = await fetch(`${API}/api/providers/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            toast(
+              `✓ ${data.provider} OK — ${data.latencyMs}ms (${data.model})`
+            );
+          } else {
+            toast(
+              `✗ ${data.provider}: ${data.error || "failed"}${
+                data.status ? ` (HTTP ${data.status})` : ""
+              }`
+            );
+          }
+        } catch (e) {
+          toast("Test failed: " + (e.message || e));
+        }
+      }
+
+      async function testProvider() {
+        const providerId = document.getElementById("cfgProvider").value;
+        const provider = getProvider(providerId);
+        if (!provider) return toast("Unknown provider.");
+        const apiKey = document.getElementById("cfgApiKey").value;
+        const payload = { id: providerId };
+        if (apiKey && !apiKey.includes("•")) payload.apiKey = apiKey;
+        await runProviderTest(payload);
+      }
+
+      async function testProviderById(id) {
+        await runProviderTest({ id });
+      }
+
+      // ── Provider Manager ──
+      function openProviderManager() {
+        pmEditingId = null;
+        document.getElementById("pmTitle").textContent = "Manage Providers";
+        document.getElementById("pmList").style.display = "block";
+        document.getElementById("pmEditor").style.display = "none";
+        renderProviderList();
+        document.getElementById("providerModal").style.display = "flex";
+      }
+
+      function closeProviderManager() {
+        document.getElementById("providerModal").style.display = "none";
+      }
+
+      function renderProviderList() {
+        const el = document.getElementById("pmList");
+        if (!providers.length) {
+          el.innerHTML = '<div class="empty">No providers defined</div>';
+          return;
+        }
+        el.innerHTML = providers
+          .map((p) => {
+            const def = getDefaultModel(p);
+            const count = (p.models || []).length;
+            return `
+        <div class="provider-row">
+            <div class="meta">
+              <div class="pname">${p.name} ${
+              p.builtin
+                ? '<span class="tag">built-in</span>'
+                : '<span class="tag tag-accent">custom</span>'
+            }</div>
+              <div class="psub">
+                <span class="tag">${p.protocol}</span>
+                <span class="tag tag-green">default: ${def ? def.name : "—"}</span>
+                <span class="mono">${p.id}</span>
+              </div>
+              <div class="psub">${count} model${
+              count === 1 ? "" : "s"
+            } · ${p.baseUrl || "protocol default endpoint"}</div>
+            </div>
+            <div class="actions" style="margin: 0">
+              <button class="btn btn-sm" onclick="testProviderById('${p.id}')">Test</button>
+              ${
+                p.builtin
+                  ? ""
+                  : `<button class="btn btn-sm" onclick="openProviderEditor('${p.id}')">Edit</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteProvider('${p.id}')">Delete</button>`
+              }
+            </div>
+        </div>`;
+          })
+          .join("");
+      }
+
+      function slugifyId() {
+        const el = document.getElementById("pmId");
+        el.value = el.value
+          .toLowerCase()
+          .replace(/[^a-z0-9-_]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 32);
+      }
+
+      function openProviderEditor(id) {
+        pmEditingId = id || null;
+        const p = id ? getProvider(id) : null;
+        document.getElementById("pmTitle").textContent = p
+          ? `Edit: ${p.name}`
+          : "Add Custom Provider";
+        document.getElementById("pmList").style.display = "none";
+        document.getElementById("pmEditor").style.display = "block";
+        document.getElementById("pmId").readOnly = !!p;
+        document.getElementById("pmName").value = p ? p.name : "";
+        document.getElementById("pmId").value = p ? p.id : "";
+        document.getElementById("pmProtocol").value = p
+          ? p.protocol
+          : "openai";
+        document.getElementById("pmBaseUrl").value = p ? p.baseUrl || "" : "";
+        document.getElementById("pmApiKey").value = "";
+        document.getElementById("pmApiKey").placeholder = p
+          ? "leave empty to keep current key"
+          : "...";
+        document.getElementById("pmKeyPlaceholder").value = p
+          ? p.keyPlaceholder
+          : "";
+        document.getElementById("pmModels").value = p
+          ? formatModelsText(p.models)
+          : "";
+      }
+
+      function cancelProviderEditor() {
+        document.getElementById("pmEditor").style.display = "none";
+        document.getElementById("pmList").style.display = "block";
+        document.getElementById("pmTitle").textContent = "Manage Providers";
+        renderProviderList();
+      }
+
+      function formatModelsText(models) {
+        return (models || [])
+          .map(
+            (m) =>
+              `${m.default ? "*" : ""}${m.id}|${m.name}|${m.contextWindow}`
+          )
+          .join("\n");
+      }
+
+      function parseModelsText(text) {
+        return text
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const def = line.startsWith("*");
+            const parts = line.replace(/^\*/, "").split("|").map((s) => s.trim());
+            const id = parts[0];
+            const ctx = parts.length >= 3 && /^\d+$/.test(parts[2])
+              ? parseInt(parts[2], 10)
+              : 128000;
+            return {
+              id,
+              name: parts[1] || id,
+              contextWindow: ctx,
+              default: def,
+            };
+          });
+      }
+
+      async function reloadProvidersAndConfig() {
+        const [providersRes, configRes] = await Promise.all([
+          fetch(`${API}/api/providers`).then((r) => r.json()),
+          fetch(`${API}/api/config`).then((r) => r.json()),
+        ]);
+        providers = Array.isArray(providersRes) ? providersRes : [];
+        currentConfig = configRes;
+        renderProviders(configRes.AI_PROVIDER);
+        applyConfig(configRes);
+      }
+
+      async function saveProvider() {
+        const id = document.getElementById("pmId").value.trim().toLowerCase();
+        const name = document.getElementById("pmName").value.trim();
+        const protocol = document.getElementById("pmProtocol").value;
+        const baseUrl = document.getElementById("pmBaseUrl").value.trim();
+        const apiKey = document.getElementById("pmApiKey").value;
+        const keyPlaceholder = document
+          .getElementById("pmKeyPlaceholder")
+          .value.trim();
+        const models = parseModelsText(
+          document.getElementById("pmModels").value
+        );
+
+        if (!id || !name) return toast("Name and id are required.");
+        if (!models.length) return toast("At least one model is required.");
+
+        const payload = { id, name, protocol, baseUrl, keyPlaceholder, models };
+        if (apiKey) payload.apiKey = apiKey;
+
+        const method = pmEditingId ? "PUT" : "POST";
+        const url = pmEditingId
+          ? `${API}/api/providers/${encodeURIComponent(pmEditingId)}`
+          : `${API}/api/providers`;
+
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast("Failed: " + (data.error || "Unknown"));
+
+        await reloadProvidersAndConfig();
+        cancelProviderEditor();
+        toast("Provider saved.");
+      }
+
+      async function deleteProvider(id) {
+        if (!confirm(`Delete custom provider "${id}"?`)) return;
+        const res = await fetch(
+          `${API}/api/providers/${encodeURIComponent(id)}`,
+          { method: "DELETE" }
+        );
+        const data = await res.json();
+        if (!res.ok) return toast("Failed: " + (data.error || "Unknown"));
+        await reloadProvidersAndConfig();
+        renderProviderList();
+        toast("Provider deleted.");
       }
 
       async function savePolicy() {
