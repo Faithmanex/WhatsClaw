@@ -45,9 +45,13 @@ export class Medulla {
     }
 
     public recordInteraction(jid: string) {
-        const metadata = this.loadActivityMetadata();
-        metadata[jid] = Date.now();
-        this.saveActivityMetadata(metadata);
+        try {
+            const metadata = this.loadActivityMetadata();
+            metadata[jid] = Date.now();
+            this.saveActivityMetadata(metadata);
+        } catch (e: any) {
+            console.warn(`[Medulla] Failed to record interaction for ${jid}: ${e?.message || e}`);
+        }
     }
 
     private loadActivityMetadata(): Record<string, number> {
@@ -62,7 +66,11 @@ export class Medulla {
     }
 
     private saveActivityMetadata(data: Record<string, number>) {
-        fs.writeFileSync(this.recentInteractionsPath, JSON.stringify(data, null, 2), 'utf8');
+        try {
+            fs.writeFileSync(this.recentInteractionsPath, JSON.stringify(data, null, 2), 'utf8');
+        } catch (e: any) {
+            console.warn(`[Medulla] Failed to persist activity metadata: ${e?.message || e}`);
+        }
     }
 
     private async pulse() {

@@ -72,7 +72,7 @@ function buildProvider(provider: ProviderDefinition, modelId: string, apiKey: st
         case 'anthropic':
             return new AnthropicProvider({ apiKey, modelId, baseUrl: provider.baseUrl, timeoutMs });
         case 'gemini':
-            return new GeminiProvider({ apiKey, modelId, baseUrl: provider.baseUrl });
+            return new GeminiProvider({ apiKey, modelId, baseUrl: provider.baseUrl, timeoutMs });
         case 'openai':
         default:
             return new OpenAIProvider({
@@ -99,7 +99,8 @@ function buildAIProviderFromConfig(): AIProvider {
     if (!apiKey || apiKey === 'your_key_here') {
         throw new Error(`No API key configured for provider "${provider.name}" (${provider.apiKeyEnvVar})`);
     }
-    return buildProvider(provider, modelId, apiKey);
+    const timeoutMs = parseInt(runtimeConfig.get('AI_TIMEOUT_MS', '60000')) || 60000;
+    return buildProvider(provider, modelId, apiKey, timeoutMs);
 }
 
 function refreshAIProvider() {
@@ -471,7 +472,7 @@ app.post('/api/logout', async (_req, res) => {
         currentQR = null;
         connectionStatus = 'disconnected';
         io.emit('status', 'disconnected');
-        setTimeout(() => connectToWhatsApp(), 1000);
+        safeConnectToWhatsApp(1000);
     } catch (_e) {}
     res.json({ ok: true });
 });
@@ -486,7 +487,37 @@ app.use((_req, res, next) => {
     res.sendFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
 });
 
+// Global error handler — returns JSON instead of letting Express dump HTML/stack traces,
+// and turns body-parse failures (malformed JSON) into clean 400s.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = err?.status || err?.statusCode || (err?.type === 'entity.parse.failed' ? 400 : 500);
+    if (status >= 500) {
+        console.error(`[API] ${status} on ${_req.method} ${_req.path}: ${err?.message || err}`);
+    }
+    if (res.headersSent) return;
+    res.status(status).json({ error: err?.message || 'Internal server error' });
+});
+
 // ── WhatsApp Connection ──
+let reconnectTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Wraps connectToWhatsApp so auth/version/socket failures never crash the process
+ * or kill the reconnect loop — failures are logged and a retry is scheduled.
+ */
+async function safeConnectToWhatsApp(retryMs: number = 5000) {
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    try {
+        await connectToWhatsApp();
+    } catch (err: any) {
+        console.error(`[WhatsApp] Connect failed: ${err?.message || err}`);
+        reconnectTimer = setTimeout(() => safeConnectToWhatsApp(retryMs), retryMs);
+    }
+}
+
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -523,9 +554,10 @@ async function connectToWhatsApp() {
                 if (fs.existsSync(authDir)) {
                     fs.rmSync(authDir, { recursive: true, force: true });
                 }
-                setTimeout(() => connectToWhatsApp(), 1000);
+                safeConnectToWhatsApp(1000);
             } else {
-                setTimeout(() => connectToWhatsApp(), 5000);
+                console.error(`[WhatsApp] Connection closed${statusCode ? ` (${statusCode})` : ''}: ${(lastDisconnect?.error as Boom)?.message || ''}`);
+                safeConnectToWhatsApp(5000);
             }
         } else if (connection === 'open') {
             currentQR = null;
@@ -602,6 +634,10 @@ async function connectToWhatsApp() {
             const mentionTrigger = runtimeConfig.get('WHATSAPP_MENTION_TRIGGER');
             if (mentionTrigger && !body.toLowerCase().includes(mentionTrigger.toLowerCase())) continue;
 
+            // Tracks whether a failure originated from the AI provider call (vs internal
+            // bookkeeping) so we only ever message the contact about AI-side failures.
+            let aiCallActive = false;
+
             try {
                 cognition.processEmotion(body);
                 const limit = parseInt(runtimeConfig.get('HISTORY_LIMIT', '30'));
@@ -622,7 +658,12 @@ async function connectToWhatsApp() {
                 rateLimiter.beginCall(remoteJid);
 
                 try {
-                    await activeMessageSkill.sendTyping(remoteJid);
+                    // Typing indicator is cosmetic — a failure must never break the reply pipeline.
+                    try {
+                        await activeMessageSkill.sendTyping(remoteJid);
+                    } catch (typingErr: any) {
+                        console.warn(`[WhatsApp] Typing indicator failed for ${remoteJid}: ${typingErr?.message || typingErr}`);
+                    }
 
                     const personaName = runtimeConfig.get('PERSONA_NAME', 'Antigravity');
                     const personaProfile = runtimeConfig.get('PERSONA_PROFILE', 'street-smart');
@@ -659,10 +700,12 @@ async function connectToWhatsApp() {
                         systemPrompt += `\n\n[CONVERSATION HISTORY — none available yet. You have no memory of past messages in this chat. If asked about earlier conversations, say you don't remember rather than making something up.]`;
                     }
 
-                const response = await activeAIProvider.generateResponse(
-                    [{ role: 'system', content: systemPrompt }],
-                    body
-                );
+aiCallActive = true;
+                    const response = await activeAIProvider.generateResponse(
+                        [{ role: 'system', content: systemPrompt }],
+                        body
+                    );
+                    aiCallActive = false;
 
                 // ── Action Parser ──
                 function extractJSON(text: string) {
@@ -806,6 +849,12 @@ async function connectToWhatsApp() {
                     rateLimiter.endCall(remoteJid);
                 }
             } catch (error: any) {
+                // Errors that are NOT from the AI call itself (history writes, instruction reads,
+                // action execution) are internal — log them but never message the contact.
+                if (!aiCallActive) {
+                    console.error(`[WhatsApp] Failed to process message in ${remoteJid}: ${error?.stack || error?.message || error}`);
+                    continue;
+                }
                 const providerId = runtimeConfig.get('AI_PROVIDER', '');
                 const providerName = providerRegistry.getProvider(providerId)?.name || providerId || 'AI provider';
                 const info = classifyAIError(error);
@@ -833,8 +882,12 @@ async function connectToWhatsApp() {
 // ── Boot ──
 server.listen(PORT, () => {
     console.log(`Dashboard: http://localhost:${PORT}`);
-    connectToWhatsApp().catch(err => console.error('Critical:', err));
+    safeConnectToWhatsApp(5000);
 });
 
-process.on('uncaughtException', (err) => console.error('Uncaught:', err));
-process.on('unhandledRejection', (err) => console.error('Unhandled:', err));
+process.on('uncaughtException', (err) => {
+    console.error(`[Process] Uncaught exception: ${err?.stack || err}`);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error(`[Process] Unhandled rejection: ${reason instanceof Error ? reason.stack : reason}`);
+});

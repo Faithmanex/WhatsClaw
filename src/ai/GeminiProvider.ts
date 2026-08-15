@@ -5,17 +5,18 @@ export interface GeminiProviderOptions {
     apiKey: string;
     modelId: string;
     baseUrl?: string;
+    timeoutMs?: number;
 }
 
 export class GeminiProvider implements AIProvider {
     private genAI: GoogleGenerativeAI;
     private model: any;
 
-    constructor({ apiKey, modelId, baseUrl }: GeminiProviderOptions) {
+    constructor({ apiKey, modelId, baseUrl, timeoutMs }: GeminiProviderOptions) {
         this.genAI = new GoogleGenerativeAI(apiKey);
         this.model = this.genAI.getGenerativeModel(
             { model: modelId },
-            baseUrl ? { baseUrl } : undefined
+            baseUrl ? { baseUrl, timeout: timeoutMs } : timeoutMs ? { timeout: timeoutMs } : undefined
         );
     }
 
